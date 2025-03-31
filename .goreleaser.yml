@@ -1,5 +1,5 @@
 version: 2
-project_name: kubeconform
+project_name: kube-switch
 builds:
   - main: ./
     env:
