@@ -1,0 +1,14 @@
+Website = "https://sr.ios.in.ua"
+
+[Details]
+  Icon = "pkg/resdata/resources/icon.png"
+  Name = "go-k8s-context"
+  ID = "redacid.k8s.context"
+  Version = "0.0.1"
+  Build = 7
+
+[LinuxAndBSD]
+  GenericName = "K8S Context"
+  Categories = ["Network"]
+  Comment = "Change k8s context"
+  Keywords = ["k8s", "kubernetes", "context"]

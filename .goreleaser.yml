@@ -1,0 +1,37 @@
+version: 2
+project_name: kubeconform
+builds:
+  - main: ./
+    env:
+      - CGO_ENABLED=0
+      - GOFLAGS = -mod=vendor
+      - GO111MODULE = on
+      - GIT_OWNER = redacid
+    goos:
+      - windows
+      - linux
+      - darwin
+    goarch:
+      - "386"
+      - amd64
+      - arm
+      - arm64
+    flags:
+      - -trimpath
+      - -tags=netgo
+      - -a
+    ldflags:
+      - -extldflags "-static"
+      - -X main.version={{.Tag}}
+
+checksum:
+  name_template: 'CHECKSUMS'
+
+snapshot:
+  version_template: "{{ .Tag }}-next"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - '^test:'
