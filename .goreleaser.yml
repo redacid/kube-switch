@@ -17,7 +17,7 @@ builds:
       #- arm
       #- arm64
     goamd64:
-      - v2
+      - v1
     flags:
       - -trimpath
       - -tags=netgo
@@ -26,11 +26,13 @@ builds:
     ldflags:
       - -extldflags "-static"
       - -X main.version={{.Tag}}
-#    ignore:
-#      - goos: darwin
-#      - goos: windows
-#      - goarm: mips64
-#      - gomips: hardfloat
+    ignore:
+      - goos: darwin
+      - goos: windows
+      - goarch: arm
+      - goarch: arm64
+      - goarch: "386"
+
 
 
 checksum:
