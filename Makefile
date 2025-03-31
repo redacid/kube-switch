@@ -4,8 +4,9 @@ SHELL := /bin/bash
 #DEBUG := --debug
 #VERBOSE := --verbose
 BUILD_DIR := ./build
-APP_NAME := go-k8s-context
+APP_NAME := kube-switch
 OS := linux
+ARCH := amd64
 OSES := linux windows
 ICON := pkg/resdata/resources/icon-green.png
 
@@ -24,11 +25,6 @@ TARGET_MAX_CHAR_NUM = 30
 .EXPORT_ALL_VARIABLES:
 
 all: help
-## Show env vars
-
-#foreach:
-#	@$(foreach var,$(OSES), echo "\n\n======= Check $(var) =======\n\n" \
-#	&& fyne package --name $(APP_NAME) --release --executable $(APP_NAME) -os $(var) -icon $(ICON) || exit;)
 
 mod-tidy:
 	go mod tidy
@@ -39,30 +35,24 @@ run:
 make_build_dir:
 	mkdir -p $(BUILD_DIR)
 
-#bundle_linux:
-	#go generate fyne bundle -package resdata -o icons_bundled.go resources
-#	fyne bundle --name $(APP_NAME) --package main
-
 build_linux: clean make_build_dir
-	fyne build --output $(BUILD_DIR)/$(APP_NAME) -os $(OS)  --metadata Details.Version=$(RELEASE_VERSION)
-	chmod +x $(BUILD_DIR)/$(APP_NAME)
+	fyne build --release --output $(BUILD_DIR)/$(APP_NAME)_$(OS)_$(ARCH) --target $(OS) --metadata Details.Version=$(RELEASE_VERSION)
+	chmod +x $(BUILD_DIR)/$(APP_NAME)_$(OS)_$(ARCH)
 
 build_run_linux: build_linux
-	$(BUILD_DIR)/$(APP_NAME)
+	$(BUILD_DIR)/$(APP_NAME)_$(OS)_$(ARCH)
 
 release_linux: clean
 	fyne release --name $(APP_NAME) --executable $(APP_NAME) -os $(OS) -icon $(ICON)
 
-package_linux: clean
+package_linux: clean make_build_dir
 	fyne package --name $(APP_NAME) --release --executable $(APP_NAME) -os $(OS) -icon $(ICON)
 
 package_web:
 	fyne package --release -os web
 
-
 chrome_cors:
 	/opt/google/chrome/chrome --user-data-dir="/tmp" --disable-web-security
-
 
 clean:
 	rm *.tar.xz 2> /dev/null || exit 0
@@ -77,16 +67,13 @@ install_fyne_cmd:
 install_fyne_cross_cmd:
 	go install github.com/fyne-io/fyne-cross@latest
 
-
-
-git-tag:
+git-release: build_linux
 	gh release delete $(RELEASE_VERSION) --cleanup-tag -y --repo git@github.com:redacid/kube-switch.git || exit 0;
 	git tag -d $(RELEASE_VERSION) || exit 0;
-	#git push origin --delete $(RELEASE_VERSION)
-	#git tag -a $(RELEASE_VERSION) -m "Release $(RELEASE_VERSION)"
-	#git push origin $(RELEASE_VERSION)
 	gh release create $(RELEASE_VERSION) --generate-notes --notes "$(RELEASE_VERSION)" --repo git@github.com:redacid/kube-switch.git
-	git pull && git fetch && git fetch --all
+
+git-upload-release-files: git-release
+	gh release upload $(RELEASE_VERSION) $(BUILD_DIR)/$(APP_NAME)_$(OS)_$(ARCH) --repo git@github.com:redacid/kube-switch.git
 
 git-update:
 	git pull && git fetch && git fetch --all
@@ -96,13 +83,13 @@ git-commit:
 	git commit -m "Release create"
 	git push
 
-goreleaser: git-commit git-tag
+goreleaser: git-commit git-release
 	goreleaser build --clean --single-target --verbose
 
 goreleaser-build-static:
 	docker run -t -e GOOS=linux -e GOARCH=amd64 -v $$PWD:/go/src/github.com/redacid/kube-switch -w /go/src/github.com/redacid/kube-switch goreleaser/goreleaser:$(GO_RELEASER_VERSION) build --clean --single-target --snapshot --verbose
 
-release: git-tag
+release: git-git-release
 	docker run -e GITHUB_TOKEN -e GIT_OWNER -it -v /var/run/docker.sock:/var/run/docker.sock -v $$PWD:/go/src/github.com/redacid/kube-switch -w /go/src/github.com/redacid/kube-switch goreleaser/goreleaser:$(GO_RELEASER_VERSION) release --clean || exit 0;
 	docker container prune -f
 
