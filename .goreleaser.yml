@@ -9,17 +9,17 @@ builds:
       - GOFLAGS = -mod=vendor
       - GO111MODULE = on
       - GIT_OWNER = redacid
-    goos:
-      #- windows
-      - linux
-      #- darwin
-    goarch:
-      #- "386"
-      - amd64
-      #- arm
-      #- arm64
-    goamd64:
-      - v1
+#    goos:
+#      #- windows
+#      - linux
+#      #- darwin
+#    goarch:
+#      #- "386"
+#      - amd64
+#      #- arm
+#      #- arm64
+#    goamd64:
+#      - v1
     flags:
       - -trimpath
       - -tags=netgo
