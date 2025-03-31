@@ -5,10 +5,10 @@ builds:
     targets:
       - linux_amd64_v1
     env:
-      - CGO_ENABLED=0
-      - GOFLAGS = -mod=vendor
-      - GO111MODULE = on
-      - GIT_OWNER = redacid
+#      - CGO_ENABLED=0
+#      - GOFLAGS = -mod=vendor
+#      - GO111MODULE = on
+#      - GIT_OWNER = redacid
 #    goos:
 #      #- windows
 #      - linux
