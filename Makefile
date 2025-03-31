@@ -10,6 +10,7 @@ OSES := linux windows
 ICON := pkg/resdata/resources/icon-green.png
 
 RELEASE_VERSION ?= v0.0.1
+GO_RELEASER_VERSION := v2.7.0
 
 # colors
 GREEN = $(shell tput -Txterm setaf 2)
@@ -88,11 +89,12 @@ git-tag:
 	git pull && git fetch && git fetch --all
 
 goreleaser-build-static:
-	docker run -t -e GOOS=linux -e GOARCH=amd64 -v $$PWD:/go/src/github.com/redacid/kube-switch -w /go/src/github.com/redacid/kube-switch goreleaser/goreleaser:v2.7.0 build --clean --single-target --snapshot
+	docker run -t -e GOOS=linux -e GOARCH=amd64 -v $$PWD:/go/src/github.com/redacid/kube-switch -w /go/src/github.com/redacid/kube-switch goreleaser/goreleaser:$(GO_RELEASER_VERSION) build --clean --single-target --snapshot
 
 release: git-tag
-	docker run -e GITHUB_TOKEN -e GIT_OWNER -it -v /var/run/docker.sock:/var/run/docker.sock -v $$PWD:/go/src/github.com/redacid/kube-switch -w /go/src/github.com/redacid/kubeconform goreleaser/goreleaser:v2.7.0 release --clean || exit 0;
+	docker run -e GITHUB_TOKEN -e GIT_OWNER -it -v /var/run/docker.sock:/var/run/docker.sock -v $$PWD:/go/src/github.com/redacid/kube-switch -w /go/src/github.com/redacid/kube-switch goreleaser/goreleaser:$(GO_RELEASER_VERSION) release --clean || exit 0;
 	docker container prune -f
+
 ## Shows help. | Help
 help:
 	@echo ''
