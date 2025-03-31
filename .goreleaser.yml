@@ -16,8 +16,8 @@ builds:
       - amd64
       #- arm
       #- arm64
-#    goamd64:
-#      - v2
+    goamd64:
+      - v2
     flags:
       - -trimpath
       - -tags=netgo

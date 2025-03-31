@@ -91,7 +91,12 @@ git-tag:
 git-update:
 	git pull && git fetch && git fetch --all
 
-goreleaser:
+git-commit:
+	git add -A
+	git commit -m "Release create"
+	git push
+
+goreleaser: git-commit git-tag
 	goreleaser build --clean --single-target --verbose
 
 goreleaser-build-static:
