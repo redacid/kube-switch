@@ -27,11 +27,23 @@ builds:
       - -extldflags "-static"
       - -X main.version={{.Tag}}
     ignore:
+      - goos: linux
+        goarch:
+          - "386"
+          - arm
+          - arm64
       - goos: darwin
+        goarch:
+          - "386"
+          - arm
+          - arm64
+          - amd64
       - goos: windows
-      - goarch: arm
-      - goarch: arm64
-      - goarch: "386"
+        goarch:
+          - arm
+          - arm64
+          - "386"
+          - amd64
       - go386:
           - sse2
           - hardfloat
