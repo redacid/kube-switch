@@ -19,7 +19,7 @@ builds:
     flags:
       - -trimpath
       - -tags=netgo
-      - -a
+      #- -a
     ldflags:
       - -extldflags "-static"
       - -X main.version={{.Tag}}
