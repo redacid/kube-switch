@@ -77,8 +77,7 @@ install_fyne_cmd:
 install_fyne_cross_cmd:
 	go install github.com/fyne-io/fyne-cross@latest
 
-git-update:
-	git pull && git fetch && git fetch --all
+
 
 git-tag:
 	gh release delete $(RELEASE_VERSION) --cleanup-tag -y --repo git@github.com:redacid/kube-switch.git || exit 0;
@@ -87,6 +86,9 @@ git-tag:
 	#git tag -a $(RELEASE_VERSION) -m "Release $(RELEASE_VERSION)"
 	#git push origin $(RELEASE_VERSION)
 	gh release create $(RELEASE_VERSION) --generate-notes --notes "$(RELEASE_VERSION)" --repo git@github.com:redacid/kube-switch.git
+	git pull && git fetch && git fetch --all
+
+git-update:
 	git pull && git fetch && git fetch --all
 
 goreleaser-build-static:
