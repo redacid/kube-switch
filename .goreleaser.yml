@@ -25,9 +25,9 @@ builds:
       - -tags=netgo
       - -a
       - -v
-    ldflags:
-      - -extldflags "-static"
-      - -X main.version={{.Tag}}
+#    ldflags:
+#      - -extldflags "-static"
+#      - -X main.version={{.Tag}}
 #    ignore:
 #      - goos: linux
 #        goarch:
