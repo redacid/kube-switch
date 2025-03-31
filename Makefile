@@ -9,6 +9,8 @@ OS := linux
 OSES := linux windows
 ICON := pkg/resdata/resources/icon-green.png
 
+RELEASE_VERSION ?= v0.0.1
+
 # colors
 GREEN = $(shell tput -Txterm setaf 2)
 YELLOW = $(shell tput -Txterm setaf 3)
@@ -40,7 +42,7 @@ make_build_dir:
 #	fyne bundle --name $(APP_NAME) --package main
 
 build_linux: clean make_build_dir
-	fyne build --output $(BUILD_DIR)/$(APP_NAME) -os $(OS)
+	fyne build --output $(BUILD_DIR)/$(APP_NAME) -os $(OS)  --metadata Details.Version=$(RELEASE_VERSION)
 	chmod +x $(BUILD_DIR)/$(APP_NAME)
 
 build_run_linux: build_linux
@@ -73,21 +75,23 @@ install_fyne_cmd:
 install_fyne_cross_cmd:
 	go install github.com/fyne-io/fyne-cross@latest
 
+git-update:
+	git pull && git fetch && git fetch --all
+
 git-tag:
-	gh release delete $(RELEASE_VERSION) --cleanup-tag -y --repo git@github.com:redacid/kubeconform.git || exit 0;
+	gh release delete $(RELEASE_VERSION) --cleanup-tag -y --repo git@github.com:redacid/kube-switch.git || exit 0;
 	git tag -d $(RELEASE_VERSION) || exit 0;
 	#git push origin --delete $(RELEASE_VERSION)
 	#git tag -a $(RELEASE_VERSION) -m "Release $(RELEASE_VERSION)"
 	#git push origin $(RELEASE_VERSION)
-	gh release create $(RELEASE_VERSION) --generate-notes --notes "$(RELEASE_VERSION)" --repo git@github.com:redacid/kubeconform.git
+	gh release create $(RELEASE_VERSION) --generate-notes --notes "$(RELEASE_VERSION)" --repo git@github.com:redacid/kube-switch.git
 	git pull && git fetch && git fetch --all
 
 goreleaser-build-static:
-	docker run -t -e GOOS=linux -e GOARCH=amd64 -v $$PWD:/go/src/github.com/redacid/kubeconform -w /go/src/github.com/redacid/kubeconform goreleaser/goreleaser:v2.7.0 build --clean --single-target --snapshot
-	#cp dist/kubeconform_linux_amd64_v1/kubeconform bin/
+	docker run -t -e GOOS=linux -e GOARCH=amd64 -v $$PWD:/go/src/github.com/redacid/kube-switch -w /go/src/github.com/redacid/kube-switch goreleaser/goreleaser:v2.7.0 build --clean --single-target --snapshot
 
 release: git-tag
-	docker run -e GITHUB_TOKEN -e GIT_OWNER -it -v /var/run/docker.sock:/var/run/docker.sock -v $$PWD:/go/src/github.com/redacid/kubeconform -w /go/src/github.com/redacid/kubeconform goreleaser/goreleaser:v2.7.0 release --clean || exit 0;
+	docker run -e GITHUB_TOKEN -e GIT_OWNER -it -v /var/run/docker.sock:/var/run/docker.sock -v $$PWD:/go/src/github.com/redacid/kube-switch -w /go/src/github.com/redacid/kubeconform goreleaser/goreleaser:v2.7.0 release --clean || exit 0;
 	docker container prune -f
 ## Shows help. | Help
 help:
