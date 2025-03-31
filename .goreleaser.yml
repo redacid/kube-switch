@@ -21,8 +21,8 @@ builds:
 #    goamd64:
 #      - v1
     flags:
-      - -trimpath
-      - -tags=netgo
+#      - -trimpath
+#      - -tags=netgo
       - -a
       - -v
 #    ldflags:
