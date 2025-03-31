@@ -67,12 +67,12 @@ install_fyne_cmd:
 install_fyne_cross_cmd:
 	go install github.com/fyne-io/fyne-cross@latest
 
-git-release: build_linux
+git-release:
 	gh release delete $(RELEASE_VERSION) --cleanup-tag -y --repo git@github.com:redacid/kube-switch.git || exit 0;
 	git tag -d $(RELEASE_VERSION) || exit 0;
 	gh release create $(RELEASE_VERSION) --generate-notes --notes "$(RELEASE_VERSION)" --repo git@github.com:redacid/kube-switch.git
 
-git-upload-release-files: git-release
+git-upload-release-files: build_linux git-release
 	gh release upload $(RELEASE_VERSION) $(BUILD_DIR)/$(APP_NAME)_$(OS)_$(ARCH) --repo git@github.com:redacid/kube-switch.git
 
 git-update:
