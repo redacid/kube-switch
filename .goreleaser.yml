@@ -5,29 +5,24 @@ builds:
     targets:
       - linux_amd64_v1
     env:
-#      - CGO_ENABLED=0
-#      - GOFLAGS = -mod=vendor
-#      - GO111MODULE = on
-#      - GIT_OWNER = redacid
-#    goos:
-#      #- windows
-#      - linux
-#      #- darwin
-#    goarch:
-#      #- "386"
-#      - amd64
-#      #- arm
-#      #- arm64
-#    goamd64:
-#      - v1
+      - CGO_ENABLED=0
+      - GOFLAGS = -mod=vendor
+      - GO111MODULE = on
+      - GIT_OWNER = redacid
+    goos:
+      - linux
+    goarch:
+      - amd64
+    goamd64:
+      - v1
     flags:
-#      - -trimpath
-#      - -tags=netgo
+      - -trimpath
+      - -tags=netgo
       - -a
       - -v
-#    ldflags:
-#      - -extldflags "-static"
-#      - -X main.version={{.Tag}}
+    ldflags:
+      - -extldflags "-static"
+      - -X main.version={{.Tag}}
 #    ignore:
 #      - goos: linux
 #        goarch:

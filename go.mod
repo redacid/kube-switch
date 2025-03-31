@@ -1,6 +1,6 @@
 module github.com/redacid/kube-switch
 
-go 1.23.6
+go 1.23.5
 
 require (
 	fyne.io/fyne/v2 v2.5.5
