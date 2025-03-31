@@ -7,12 +7,11 @@ BUILD_DIR := ./build
 APP_NAME := kube-switch
 OS := linux
 ARCH := amd64
-OSES := linux windows
+OSES := linux
 ICON := pkg/resdata/resources/icon-green.png
 
 RELEASE_VERSION ?= v0.0.1
-#GO_RELEASER_VERSION := v2.7.0
-GO_RELEASER_VERSION := v2.8.1
+
 
 # colors
 GREEN = $(shell tput -Txterm setaf 2)
@@ -77,21 +76,6 @@ git-upload-release-files: git-release
 
 git-update:
 	git pull && git fetch && git fetch --all
-
-git-commit:
-	git add -A
-	git commit -m "Release create"
-	git push
-
-goreleaser: git-commit git-release
-	goreleaser build --clean --single-target --verbose
-
-goreleaser-build-static:
-	docker run -t -e GOOS=linux -e GOARCH=amd64 -v $$PWD:/go/src/github.com/redacid/kube-switch -w /go/src/github.com/redacid/kube-switch goreleaser/goreleaser:$(GO_RELEASER_VERSION) build --clean --single-target --snapshot --verbose
-
-release: git-git-release
-	docker run -e GITHUB_TOKEN -e GIT_OWNER -it -v /var/run/docker.sock:/var/run/docker.sock -v $$PWD:/go/src/github.com/redacid/kube-switch -w /go/src/github.com/redacid/kube-switch goreleaser/goreleaser:$(GO_RELEASER_VERSION) release --clean || exit 0;
-	docker container prune -f
 
 ## Shows help. | Help
 help:
