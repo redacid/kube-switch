@@ -2,6 +2,8 @@ version: 2
 project_name: kube-switch
 builds:
   - main: ./
+    targets:
+      - linux_amd64_v1
     env:
       - CGO_ENABLED=0
       - GOFLAGS = -mod=vendor
@@ -26,35 +28,35 @@ builds:
     ldflags:
       - -extldflags "-static"
       - -X main.version={{.Tag}}
-    ignore:
-      - goos: linux
-        goarch:
-          - "386"
-          - arm
-          - arm64
-      - goos: darwin
-        goarch:
-          - "386"
-          - arm
-          - arm64
-          - amd64
-      - goos: windows
-        goarch:
-          - arm
-          - arm64
-          - "386"
-          - amd64
-      - go386:
-          - sse2
-          - hardfloat
-      - goarm:
-          - 6
-          - 7
-      - goppc64:
-          - power8
-          - power9
-      - goriscv64:
-          - rva22u64
+#    ignore:
+#      - goos: linux
+#        goarch:
+#          - "386"
+#          - arm
+#          - arm64
+#      - goos: darwin
+#        goarch:
+#          - "386"
+#          - arm
+#          - arm64
+#          - amd64
+#      - goos: windows
+#        goarch:
+#          - arm
+#          - arm64
+#          - "386"
+#          - amd64
+#      - go386:
+#          - sse2
+#          - hardfloat
+#      - goarm:
+#          - 6
+#          - 7
+#      - goppc64:
+#          - power8
+#          - power9
+#      - goriscv64:
+#          - rva22u64
 
 checksum:
   name_template: 'CHECKSUMS'
