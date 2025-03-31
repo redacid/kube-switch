@@ -10,7 +10,8 @@ OSES := linux windows
 ICON := pkg/resdata/resources/icon-green.png
 
 RELEASE_VERSION ?= v0.0.1
-GO_RELEASER_VERSION := v2.7.0
+#GO_RELEASER_VERSION := v2.7.0
+GO_RELEASER_VERSION := v2.8.1
 
 # colors
 GREEN = $(shell tput -Txterm setaf 2)
