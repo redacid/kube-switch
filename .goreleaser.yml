@@ -32,8 +32,17 @@ builds:
       - goarch: arm
       - goarch: arm64
       - goarch: "386"
-
-
+      - go386:
+          - sse2
+          - hardfloat
+      - goarm:
+          - 6
+          - 7
+      - goppc64:
+          - power8
+          - power9
+      - goriscv64:
+          - rva22u64
 
 checksum:
   name_template: 'CHECKSUMS'
