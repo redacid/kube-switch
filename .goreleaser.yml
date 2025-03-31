@@ -16,13 +16,22 @@ builds:
       - amd64
       #- arm
       #- arm64
+    goamd64:
+      - v2
     flags:
       - -trimpath
       - -tags=netgo
-      #- -a
+      - -a
+      - -v
     ldflags:
       - -extldflags "-static"
       - -X main.version={{.Tag}}
+    ignore:
+      - goos: darwin
+      - goos: windows
+      - goarm: mips64
+      - gomips: hardfloat
+
 
 checksum:
   name_template: 'CHECKSUMS'
