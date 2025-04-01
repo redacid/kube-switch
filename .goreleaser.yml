@@ -22,9 +22,9 @@ builds:
       - -tags=netgo
       - -a
       - -v
-    ldflags:
-      - -extldflags "-static"
-      - -X main.version={{.Tag}}
+#    ldflags:
+#      - -extldflags "-static"
+#      - -X main.version={{.Tag}}
       #- -L /usr/include/
 #    ignore:
 #      - goos: linux
