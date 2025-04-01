@@ -15,9 +15,11 @@ sudo apt-get install libglu1-mesa-dev ..... for GL/glu.h
 sudo apt-get install libxrandr-dev ........... for X11/extensions/Xrandr.h
 sudo apt-get install libxi-dev ................... for X11/extensions/XInput.h
 
-
+snap install zig --classic --beta
 go install github.com/fyne-io/fyne-cross@latest
 go install fyne.io/fyne/v2/cmd/fyne@latest
+
+gh auth login
 
 https://gobyexample.com/
 

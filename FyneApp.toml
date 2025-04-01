@@ -5,7 +5,7 @@ Website = "https://github.com/redacid/kube-switch/wiki"
   Name = "kube-switch"
   ID = "redacid.k8s.kube-switch"
   Version = "0.0.1"
-  Build = 13
+  Build = 67
 
 [LinuxAndBSD]
   GenericName = "K8S Context Switch"

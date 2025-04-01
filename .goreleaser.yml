@@ -6,7 +6,7 @@ builds:
       - linux_amd64_v1
     env:
       - CGO_ENABLED=1
-      - CC=zig cc
+      - CC=/snap/bin/zig cc
       - GOFLAGS = -mod=vendor
       - GO111MODULE = auto
       - GIT_OWNER = redacid
