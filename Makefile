@@ -5,7 +5,7 @@ GOROOT := /home/redacid/go
 GOPATH := /home/redacid/gopath
 APP_NAME := kube-switch
 
-ICON := pkg/resdata/resources/icon-green.png
+ICON := internal/pkg/resdata/resources/icon-green.png
 PRJ_REPO := git@github.com:redacid/kube-switch.git
 RELEASE_VERSION ?= 0.0.1
 
@@ -21,53 +21,33 @@ TARGET_MAX_CHAR_NUM = 30
 
 all: help
 
-## Build and Publish
+## Build and Publish | Publish
 git-publish:
 	make clean-workspace
-	make git-release
+	#make git-release
 	make fyne-cross-build-linux
 	make fyne-cross-build-windows
-	make git-upload-release
+	#make git-upload-release
 	make clean-workspace
 
-go-mod-tidy:
-	go mod tidy
 
-go-run:
-	go run ./
-
+## Build Linux binaries | Build
 fyne-cross-build-linux: install_fyne_cross_cmd
-	fyne-cross linux -app-version $(RELEASE_VERSION) -arch amd64,386,arm,arm64 -icon $(ICON) -metadata Details.Version=$(RELEASE_VERSION) \
-		-name $(APP_NAME) -release -debug
-
+	fyne-cross linux -debug -app-version $(RELEASE_VERSION) -arch amd64,386,arm,arm64 -icon $(ICON) -metadata Details.Version=$(RELEASE_VERSION) \
+		-name $(APP_NAME)
+## Build Windows binaries
 fyne-cross-build-windows: install_fyne_cross_cmd
 	fyne-cross windows -app-version $(RELEASE_VERSION) -arch amd64,386 -icon $(ICON) -metadata Details.Version=$(RELEASE_VERSION) \
 		-name $(APP_NAME) -debug
 
-.ONESHELL:
-clean-workspace:
-	rm *.tar.xz 2>/dev/null ;
-	rm -rf $(BUILD_DIR) 2>/dev/null;
-	rm -rf ./fyne-cross 2> /dev/null;
-	rm -rf ./dist 2>/dev/null;
-	rm -rf ./tmp-pkg 2>/dev/null;
-	rm fyne_metadata_init.go 2>/dev/null;
-
-install_linux_libs:
-	sudo apt install freeglut3-dev gcc libgl1-mesa-dev xorg-dev libxkbcommon-dev
-
-install_fyne_cmd:
-	go install fyne.io/fyne/v2/cmd/fyne@latest
-
-install_fyne_cross_cmd:
-	go install github.com/fyne-io/fyne-cross@latest
-
+## Create release on git | Git
 git-release:
 	gh release delete $(RELEASE_VERSION) --cleanup-tag -y --repo $(PRJ_REPO) 2>/dev/null;
 	git tag -d $(RELEASE_VERSION) 2>/dev/null;
 	gh release create $(RELEASE_VERSION) --generate-notes --notes "$(RELEASE_VERSION)" --repo $(PRJ_REPO)
 
 .ONESHELL:
+## Upload release binaries
 git-upload-release:
 	$(eval BIN_DIRS := $(shell ls ./fyne-cross/bin/))
 	$(eval DIST_DIRS := $(shell ls ./fyne-cross/dist/))
@@ -90,8 +70,38 @@ git-upload-release:
 		fi
 	done
 
+## Update project from git
 git-update:
 	git pull && git fetch && git fetch --all
+
+## Install Dependency | Install
+install_linux_libs:
+	sudo apt install freeglut3-dev gcc libgl1-mesa-dev xorg-dev libxkbcommon-dev
+## Install fyne compiler
+install_fyne_cmd:
+	go install fyne.io/fyne/v2/cmd/fyne@latest
+## Install fyne cross-platform compiler
+install_fyne_cross_cmd:
+	go install github.com/fyne-io/fyne-cross@latest
+
+.ONESHELL:
+## Clear workspace | Clean
+clean-workspace:
+	rm *.tar.xz 2>/dev/null ;
+	rm -rf $(BUILD_DIR) 2>/dev/null;
+	rm -rf ./fyne-cross 2> /dev/null;
+	rm -rf ./dist 2>/dev/null;
+	rm -rf ./tmp-pkg 2>/dev/null;
+	rm fyne_metadata_init.go 2>/dev/null;
+	exit 0;
+
+## Get golang modules | Tools
+go-mod-tidy:
+	go mod tidy
+
+## Run project
+go-run:
+	go run ./...
 
 ## Shows help. | Help
 help:

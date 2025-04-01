@@ -4,6 +4,9 @@
 ### For fyne
 https://docs.fyne.io/
 https://github.com/fyne-io/fyne
+https://github.com/FyshOS/fynedesk
+
+https://github.com/golang-standards/project-layout
 
 sudo apt install libx11-dev
 

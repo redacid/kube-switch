@@ -1,0 +1,88 @@
+[i] Target: linux/amd64
+&command.localContainerImage{baseContainerImage:command.baseContainerImage{arch:"amd64", os:"linux", id:"linux-amd64", env:map[string]string{"CC":"zig cc -target x86_64-linux-gnu -isystem /usr/include -L/usr/lib/x86_64-linux-gnu", "CXX":"zig c++ -target x86_64-linux-gnu -isystem /usr/include -L/usr/lib/x86_64-linux-gnu", "GOARCH":"amd64", "GOOS":"linux"}, tags:[]string(nil), mount:[]command.containerMountPoint{command.containerMountPoint{name:"project", localHost:"/home/redacid/Projects/REDACID/kube-switch", inContainer:"/app"}, command.containerMountPoint{name:"cache", localHost:"/home/redacid/.cache/fyne-cross", inContainer:"/go"}}, DockerImage:"docker.io/fyneio/fyne-cross-images:linux"}, runner:(*command.localContainerEngine)(0xc00015e240)}
+[i] Cleaning target directories...
+[✓] "bin" dir cleaned: /home/redacid/Projects/REDACID/kube-switch/fyne-cross/bin/linux-amd64
+[✓] "dist" dir cleaned: /home/redacid/Projects/REDACID/kube-switch/fyne-cross/dist/linux-amd64
+[✓] "temp" dir cleaned: /home/redacid/Projects/REDACID/kube-switch/fyne-cross/tmp/linux-amd64
+[i] Checking for go.mod: /home/redacid/Projects/REDACID/kube-switch/go.mod
+[✓] go.mod found
+[i] Packaging app...
+/usr/bin/docker run --rm -t -w /app -v /home/redacid/Projects/REDACID/kube-switch:/app:z -v /home/redacid/.cache/fyne-cross:/go:z --platform linux/amd64 --user 1000 -e HOME=/tmp -v /run/user/1000/keyring/ssh:/tmp/ssh-agent -e SSH_AUTH_SOCK=/tmp/ssh-agent -e CGO_ENABLED=1 -e GOCACHE=/go/go-build -e CXX=zig c++ -target x86_64-linux-gnu -isystem /usr/include -L/usr/lib/x86_64-linux-gnu -e GOOS=linux -e GOARCH=amd64 -e CC=zig cc -target x86_64-linux-gnu -isystem /usr/include -L/usr/lib/x86_64-linux-gnu docker.io/fyneio/fyne-cross-images:linux /usr/local/bin/fyne version
+
+/usr/bin/docker run --rm -t -w /app -v /home/redacid/Projects/REDACID/kube-switch:/app:z -v /home/redacid/.cache/fyne-cross:/go:z --platform linux/amd64 --user 1000 -e HOME=/tmp -v /run/user/1000/keyring/ssh:/tmp/ssh-agent -e SSH_AUTH_SOCK=/tmp/ssh-agent -e CGO_ENABLED=1 -e GOCACHE=/go/go-build -e GOOS=linux -e GOARCH=amd64 -e CC=zig cc -target x86_64-linux-gnu -isystem /usr/include -L/usr/lib/x86_64-linux-gnu -e CXX=zig c++ -target x86_64-linux-gnu -isystem /usr/include -L/usr/lib/x86_64-linux-gnu docker.io/fyneio/fyne-cross-images:linux /usr/local/bin/fyne release -os linux -name kube-switch -icon /app/fyne-cross/tmp/linux-amd64/Icon.png -appBuild 9 -appVersion v0.0.1 -appID redacid.k8s.context -metadata Details.Version=v0.0.1
+
+[✗] could not package the Fyne app: could not package the Fyne app: exit status 1
+make: *** [/home/redacid/Projects/REDACID/kube-switch/Makefile:52: fyne-cross] Error 1
+make: Leaving directory '/home/redacid/Projects/REDACID/kube-switch'
+=================
+fyne-cross linux \
+	-app-version 0.0.1 \
+	-arch amd64 \
+	-icon pkg/resdata/resources/icon-green.png \
+	-metadata Details.Version=0.0.1 \
+	-name kube-switch \
+	-release \
+	-debug \
+
+[i] Target: linux/amd64
+&command.localContainerImage{baseContainerImage:command.baseContainerImage{arch:"amd64", os:"linux", id:"linux-amd64", env:map[string]string{"CC":"zig cc -target x86_64-linux-gnu -isystem /usr/include -L/usr/lib/x86_64-linux-gnu", "CXX":"zig c++ -target x86_64-linux-gnu -isystem /usr/include -L/usr/lib/x86_64-linux-gnu", "GOARCH":"amd64", "GOOS":"linux"}, tags:[]string(nil), mount:[]command.containerMountPoint{command.containerMountPoint{name:"project", localHost:"/home/redacid/Projects/REDACID/kube-switch", inContainer:"/app"}, command.containerMountPoint{name:"cache", localHost:"/home/redacid/.cache/fyne-cross", inContainer:"/go"}}, DockerImage:"docker.io/fyneio/fyne-cross-images:linux"}, runner:(*command.localContainerEngine)(0xc000196000)}
+[i] Cleaning target directories...
+[✓] "bin" dir cleaned: /home/redacid/Projects/REDACID/kube-switch/fyne-cross/bin/linux-amd64
+[✓] "dist" dir cleaned: /home/redacid/Projects/REDACID/kube-switch/fyne-cross/dist/linux-amd64
+[✓] "temp" dir cleaned: /home/redacid/Projects/REDACID/kube-switch/fyne-cross/tmp/linux-amd64
+[i] Checking for go.mod: /home/redacid/Projects/REDACID/kube-switch/go.mod
+[✓] go.mod found
+[i] Packaging app...
+/usr/bin/docker run
+--rm -t
+-w /app
+-v /home/redacid/Projects/REDACID/kube-switch:/app:z
+-v /home/redacid/.cache/fyne-cross:/go:z
+--platform linux/amd64
+--user 1000
+-e HOME=/tmp
+-v /run/user/1000/keyring/ssh:/tmp/ssh-agent
+-e SSH_AUTH_SOCK=/tmp/ssh-agent
+-e CGO_ENABLED=1
+-e GOCACHE=/go/go-build
+-e GOOS=linux
+-e GOARCH=amd64
+-e CC=zig cc
+-target x86_64-linux-gnu
+-isystem /usr/include
+-L/usr/lib/x86_64-linux-gnu
+-e CXX=zig c++
+-target x86_64-linux-gnu
+-isystem /usr/include
+-L/usr/lib/x86_64-linux-gnu
+
+docker.io/fyneio/fyne-cross-images:linux /usr/local/bin/fyne version
+
+/usr/bin/docker run --rm -t -w /app -v /home/redacid/Projects/REDACID/kube-switch:/app:z -v /home/redacid/.cache/fyne-cross:/go:z --platform linux/amd64 --user 1000 -e HOME=/tmp -v /run/user/1000/keyring/ssh:/tmp/ssh-agent -e SSH_AUTH_SOCK=/tmp/ssh-agent -e CGO_ENABLED=1 -e GOCACHE=/go/go-build -e GOOS=linux -e GOARCH=amd64 -e CC=zig cc -target x86_64-linux-gnu -isystem /usr/include -L/usr/lib/x86_64-linux-gnu -e CXX=zig c++ -target x86_64-linux-gnu -isystem /usr/include -L/usr/lib/x86_64-linux-gnu docker.io/fyneio/fyne-cross-images:linux /usr/local/bin/fyne release -os linux -name kube-switch -icon /app/fyne-cross/tmp/linux-amd64/Icon.png -appBuild 12 -appVersion 0.0.1 -appID redacid.k8s.kube-switch -metadata Details.Version=0.0.1
+/usr/bin/docker run --rm -t -w /app -v /home/redacid/Projects/REDACID/kube-switch:/app:z -v /home/redacid/.cache/fyne-cross:/go:z --platform linux/amd64 --user 1000 -e HOME=/tmp -v /run/user/1000/keyring/ssh:/tmp/ssh-agent -e SSH_AUTH_SOCK=/tmp/ssh-agent -e CGO_ENABLED=1 -e GOCACHE=/go/go-build -e GOARCH=amd64 -e CC=zig cc -target x86_64-linux-gnu -isystem /usr/include -L/usr/lib/x86_64-linux-gnu -e CXX=zig c++ -target x86_64-linux-gnu -isystem /usr/include -L/usr/lib/x86_64-linux-gnu -e GOOS=linux docker.io/fyneio/fyne-cross-images:linux mv /app/kube-switch.tar.xz /app/fyne-cross/tmp/linux-amd64/kube-switch.tar.xz
+/usr/bin/docker run --rm -t -w /app/fyne-cross/bin/linux-amd64 -v /home/redacid/Projects/REDACID/kube-switch:/app:z -v /home/redacid/.cache/fyne-cross:/go:z --platform linux/amd64 --user 1000 -e HOME=/tmp -v /run/user/1000/keyring/ssh:/tmp/ssh-agent -e SSH_AUTH_SOCK=/tmp/ssh-agent -e CGO_ENABLED=1 -e GOCACHE=/go/go-build -e GOARCH=amd64 -e CC=zig cc -target x86_64-linux-gnu -isystem /usr/include -L/usr/lib/x86_64-linux-gnu -e CXX=zig c++ -target x86_64-linux-gnu -isystem /usr/include -L/usr/lib/x86_64-linux-gnu -e GOOS=linux docker.io/fyneio/fyne-cross-images:linux tar -xf /app/fyne-cross/tmp/linux-amd64/kube-switch.tar.xz --strip-components=3 usr/local/bin
+[✓] Package: "/home/redacid/Projects/REDACID/kube-switch/fyne-cross/dist/linux-amd64/kube-switch.tar.xz"
+
+
+&command.localContainerImage{
+baseContainerImage:command.baseContainerImage{
+arch:"amd64",
+os:"windows",
+id:"windows-amd64",
+env:map[string]string{
+"CC":"zig cc -target x86_64-windows-gnu -Wdeprecated-non-prototype -Wl,
+--subsystem,windows",
+"CXX":"zig c++ -target x86_64-windows-gnu -Wdeprecated-non-prototype -Wl,
+--subsystem,windows",
+"GOARCH":"amd64",
+"GOOS":"windows"},
+tags:[]string(nil),
+mount:[]command.containerMountPoint{
+command.containerMountPoint{
+name:"project",
+localHost:"/home/redacid/Projects/REDACID/kube-switch",
+inContainer:"/app"},
+command.containerMountPoint{name:"cache",
+localHost:"/home/redacid/.cache/fyne-cross",
+inContainer:"/go"}}, DockerImage:"docker.io/fyneio/fyne-cross-images:windows"},
+runner:(*command.localContainerEngine)(0xc0000be2d0)}

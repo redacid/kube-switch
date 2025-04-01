@@ -9,7 +9,7 @@ import (
 	"fyne.io/fyne/v2/widget"
 	"github.com/fsnotify/fsnotify"
 	"github.com/gen2brain/beeep"
-	"github.com/redacid/kube-switch/pkg/resdata"
+	"github.com/redacid/kube-switch/internal/pkg/resdata"
 	"k8s.io/client-go/tools/clientcmd"
 	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
 	"log"
