@@ -4,6 +4,7 @@ SHELL := /bin/bash
 GOROOT := /home/redacid/go
 GOPATH := /home/redacid/gopath
 APP_NAME := kube-switch
+
 ICON := pkg/resdata/resources/icon-green.png
 PRJ_REPO := git@github.com:redacid/kube-switch.git
 RELEASE_VERSION ?= 0.0.1
