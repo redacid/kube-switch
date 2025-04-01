@@ -1,6 +1,7 @@
 #PyCharm
 .idea/
 
+fyne-cross/
 !/temp/
 # Byte-compiled / optimized / DLL files
 __pycache__/
@@ -52,6 +53,7 @@ coverage.xml
 .pytest_cache/
 .mypy_cache
 
+tmp/
 
 *.log
 
