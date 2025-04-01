@@ -1,8 +1,8 @@
 -include .env
 export
 SHELL := /bin/bash
-#DEBUG := --debug
-#VERBOSE := --verbose
+GOROOT := /home/redacid/go
+GOPATH := /home/redacid/gopath
 BUILD_DIR := ./build
 APP_NAME := kube-switch
 OS := linux

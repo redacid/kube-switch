@@ -1,12 +1,13 @@
 version: 2
 project_name: kube-switch
 builds:
-  - main: ./
+  - goreleaser: ./
+    builder: zig
     targets:
       - linux_amd64_v1
     env:
       - CGO_ENABLED=1
-      - CC=/snap/bin/zig cc
+      - CC=zig cc
       - GOFLAGS = -mod=vendor
       - GO111MODULE = auto
       - GIT_OWNER = redacid
@@ -59,7 +60,7 @@ checksum:
   name_template: 'CHECKSUMS'
 
 snapshot:
-  version_template: "{{ .Tag }}-next"
+  version_template: "{{ .Tag }}-snapshot"
 
 changelog:
   sort: asc
