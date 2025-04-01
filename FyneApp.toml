@@ -2,13 +2,13 @@ Website = "https://github.com/redacid/kube-switch/wiki"
 
 [Details]
   Icon = "pkg/resdata/resources/icon.png"
-  Name = "go-k8s-context"
-  ID = "redacid.k8s.context"
+  Name = "kube-switch"
+  ID = "redacid.k8s.kube-switch"
   Version = "0.0.1"
-  Build = 9
+  Build = 13
 
 [LinuxAndBSD]
-  GenericName = "K8S Context"
+  GenericName = "K8S Context Switch"
   Categories = ["Network"]
   Comment = "Change k8s context"
   Keywords = ["k8s", "kubernetes", "context"]

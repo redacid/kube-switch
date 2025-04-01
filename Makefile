@@ -10,7 +10,7 @@ ARCH := amd64
 OSES := linux windows
 ICON := pkg/resdata/resources/icon-green.png
 
-RELEASE_VERSION ?= v0.0.1
+RELEASE_VERSION ?= 0.0.1
 GO_RELEASER_VERSION := v2.7.0
 #GO_RELEASER_VERSION := v2.8.1
 
@@ -47,6 +47,17 @@ release_linux: clean
 
 package_linux: clean make_build_dir
 	fyne package --name $(APP_NAME) --release --executable $(APP_NAME) -os $(OS) -icon $(ICON)
+
+fyne-cross: install_fyne_cross_cmd
+	fyne-cross linux \
+		-app-version $(RELEASE_VERSION) \
+		-arch amd64 \
+		-icon $(ICON) \
+		-metadata Details.Version=$(RELEASE_VERSION) \
+		-name $(APP_NAME) \
+		-release \
+		-debug
+
 
 package_web:
 	fyne package --release -os web
@@ -90,6 +101,7 @@ goreleaser-build-static:
 	docker run -t -e GOOS=linux -e GOARCH=amd64 -v $$PWD:/go/src/github.com/redacid/kube-switch -w /go/src/github.com/redacid/kube-switch goreleaser/goreleaser:$(GO_RELEASER_VERSION) build --clean --single-target --snapshot --verbose
 
 goreleaser-release: git-release git-update
+	#go clean -modcache
 	docker run -e GITHUB_TOKEN -e GIT_OWNER -it -v /var/run/docker.sock:/var/run/docker.sock -v $$PWD:/go/src/github.com/redacid/kube-switch -w /go/src/github.com/redacid/kube-switch goreleaser/goreleaser:$(GO_RELEASER_VERSION) release --clean --snapshot || exit 0;
 	docker container prune -f
 

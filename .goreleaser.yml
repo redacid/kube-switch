@@ -5,9 +5,10 @@ builds:
     targets:
       - linux_amd64_v1
     env:
-      - CGO_ENABLED=0
+      - CGO_ENABLED=1
+      - CC=zig cc
       - GOFLAGS = -mod=vendor
-      - GO111MODULE = on
+      - GO111MODULE = auto
       - GIT_OWNER = redacid
 #    goos:
 #      - linux
@@ -23,6 +24,7 @@ builds:
     ldflags:
       - -extldflags "-static"
       - -X main.version={{.Tag}}
+      #- -L /usr/include/
 #    ignore:
 #      - goos: linux
 #        goarch:

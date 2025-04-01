@@ -5,8 +5,18 @@
 https://docs.fyne.io/
 https://github.com/fyne-io/fyne
 
+sudo apt install libx11-dev
+
 apt install freeglut3-dev gcc libgl1-mesa-dev xorg-dev libxkbcommon-dev
 
+sudo apt-get install libx11-dev ................. for X11/Xlib.h
+sudo apt-get install mesa-common-dev........ for GL/glx.h
+sudo apt-get install libglu1-mesa-dev ..... for GL/glu.h
+sudo apt-get install libxrandr-dev ........... for X11/extensions/Xrandr.h
+sudo apt-get install libxi-dev ................... for X11/extensions/XInput.h
+
+
+go install github.com/fyne-io/fyne-cross@latest
 go install fyne.io/fyne/v2/cmd/fyne@latest
 
 https://gobyexample.com/
