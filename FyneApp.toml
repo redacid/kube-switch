@@ -3,7 +3,7 @@ Website = "https://github.com/redacid/kube-switch/wiki"
 [Details]
   Icon = "pkg/resdata/resources/icon.png"
   Name = "kube-switch"
-  ID = "redacid.k8s.kube-switch"
+  ID = "ua.in.ios.kube-switch"
   Version = "0.0.1"
   Build = 67
 

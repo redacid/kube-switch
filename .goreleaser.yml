@@ -1,60 +1,21 @@
 version: 2
-project_name: kube-switch
+project_name: kube_switch
 builds:
   -
     builder: zig
     targets:
-      - linux_amd64_v1
+      - x86_64-linux-gnu
     env:
       - CGO_ENABLED=1
       - CC=zig cc
+      - CXX=zig c++
       - GOFLAGS = -mod=vendor
       - GO111MODULE = auto
       - GIT_OWNER = redacid
-#    goos:
-#      - linux
-#    goarch:
-#      - amd64
-#    goamd64:
-#      - v1
+
     flags:
-      - -trimpath
-      - -tags=netgo
-      - -a
-      - -v
-#    ldflags:
-#      - -extldflags "-static"
-#      - -X main.version={{.Tag}}
-      #- -L /usr/include/
-#    ignore:
-#      - goos: linux
-#        goarch:
-#          - "386"
-#          - arm
-#          - arm64
-#      - goos: darwin
-#        goarch:
-#          - "386"
-#          - arm
-#          - arm64
-#          - amd64
-#      - goos: windows
-#        goarch:
-#          - arm
-#          - arm64
-#          - "386"
-#          - amd64
-#      - go386:
-#          - sse2
-#          - hardfloat
-#      - goarm:
-#          - 6
-#          - 7
-#      - goppc64:
-#          - power8
-#          - power9
-#      - goriscv64:
-#          - rva22u64
+      #-L/usr/include
+      #-L/usr/lib/x86_64-linux-gnu
 
 checksum:
   name_template: 'CHECKSUMS'

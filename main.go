@@ -28,7 +28,7 @@ var (
 	originFilename string
 	pathOptions    = clientcmd.NewDefaultPathOptions()
 	options        = &useContextOptions{configAccess: pathOptions}
-	myApp          = app.NewWithID("redacid.k8s.kube-switch")
+	myApp          = app.NewWithID("ua.in.ios.kube-switch")
 	desk           = myApp.(desktop.App)
 	myWindow       = myApp.NewWindow("K8S Contexts")
 	hbox           *fyne.Container

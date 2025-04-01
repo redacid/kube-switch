@@ -66,12 +66,18 @@ chrome_cors:
 
 .ONESHELL:
 clean-workspace:
-	rm *.tar.xz 2>/dev/null ;
+	rm *.tar.xz 2>/dev/null;
 	rm -rf $(BUILD_DIR) 2>/dev/null;
 	rm -rf ./fyne-cross 2> /dev/null;
 	rm -rf ./dist 2>/dev/null;
 	rm -rf ./tmp-pkg 2>/dev/null;
 	rm fyne_metadata_init.go 2>/dev/null;
+	rm -rf ./.zig-cache 2>/dev/null;
+	rm -rf ./zig-out 2>/dev/null;
+	rm -rf ./src 2>/dev/null;
+	rm build.zig 2>/dev/null;
+	rm build.zig.zon 2>/dev/null;
+	exit 0;
 
 install_linux_libs:
 	sudo apt install freeglut3-dev gcc libgl1-mesa-dev xorg-dev libxkbcommon-dev
@@ -135,10 +141,15 @@ goreleaser: git-commit git-release
 goreleaser-build-static:
 	docker run -t -e GOOS=linux -e GOARCH=amd64 -v $$PWD:/go/src/github.com/redacid/kube-switch -w /go/src/github.com/redacid/kube-switch goreleaser/goreleaser:$(GO_RELEASER_VERSION) build --clean --single-target --snapshot --verbose
 
-goreleaser-release: git-release git-update
-	#go clean -modcache
-	docker run -e GITHUB_TOKEN -e GIT_OWNER -it -v /var/run/docker.sock:/var/run/docker.sock -v $$PWD:/go/src/github.com/redacid/kube-switch -w /go/src/github.com/redacid/kube-switch goreleaser/goreleaser:$(GO_RELEASER_VERSION) release --clean --snapshot || exit 0;
-	docker container prune -f
+#goreleaser-release: git-release git-update
+#	#go clean -modcache
+#	docker run -e GITHUB_TOKEN -e GIT_OWNER -it -v /var/run/docker.sock:/var/run/docker.sock -v $$PWD:/go/src/github.com/redacid/kube-switch -w /go/src/github.com/redacid/kube-switch goreleaser/goreleaser:$(GO_RELEASER_VERSION) release --clean --snapshot || exit 0;
+#	docker container prune -f
+
+goreleaser-release: clean-workspace #git-release git-update
+	zig init
+	goreleaser release --clean --snapshot || exit 0;
+
 
 ## Shows help. | Help
 help:
