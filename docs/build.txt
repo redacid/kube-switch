@@ -1,3 +1,17 @@
+go install github.com/fyne-io/fyne-cross@latest
+fyne-cross linux --app-version 0.0.2 --arch amd64,386,arm,arm64 --icon /home/redacid/Projects/REDACID/kube-switch/internal/pkg/resdata/resources/icon-green.png --metadata Details.Version=0.0.2 \
+	--name kube-switch --debug ./cmd/kube-switch
+[i] Target: linux/amd64
+&command.localContainerImage{baseContainerImage:command.baseContainerImage{arch:"amd64", os:"linux", id:"linux-amd64", env:map[string]string{"CC":"zig cc -target x86_64-linux-gnu -isystem /usr/include -L/usr/lib/x86_64-linux-gnu", "CXX":"zig c++ -target x86_64-linux-gnu -isystem /usr/include -L/usr/lib/x86_64-linux-gnu", "GOARCH":"amd64", "GOOS":"linux"}, tags:[]string(nil), mount:[]command.containerMountPoint{command.containerMountPoint{name:"project", localHost:"/home/redacid/Projects/REDACID/kube-switch", inContainer:"/app"}, command.containerMountPoint{name:"cache", localHost:"/home/redacid/.cache/fyne-cross", inContainer:"/go"}}, DockerImage:"docker.io/fyneio/fyne-cross-images:linux"}, runner:(*command.localContainerEngine)(0xc0000c22d0)}
+[i] Cleaning target directories...
+[✓] "bin" dir cleaned: /home/redacid/Projects/REDACID/kube-switch/fyne-cross/bin/linux-amd64
+[✓] "dist" dir cleaned: /home/redacid/Projects/REDACID/kube-switch/fyne-cross/dist/linux-amd64
+[✓] "temp" dir cleaned: /home/redacid/Projects/REDACID/kube-switch/fyne-cross/tmp/linux-amd64
+[i] Checking for go.mod: /home/redacid/Projects/REDACID/kube-switch/go.mod
+[✓] go.mod found
+[✗] could not read in icon /home/redacid/Projects/REDACID/kube-switch/internal/pkg/resdata/resources/icon-green.png: open /home/redacid/Projects/REDACID/kube-switch/home/redacid/Projects/REDACID/kube-switch/internal/pkg/resdata/resources/icon-green.png: no such file or directory
+make: *** [/home/redacid/Projects/REDACID/kube-switch/Makefile:69: fyne-cross-build-linux] Error 1
+====================
 [i] Target: linux/amd64
 &command.localContainerImage{baseContainerImage:command.baseContainerImage{arch:"amd64", os:"linux", id:"linux-amd64", env:map[string]string{"CC":"zig cc -target x86_64-linux-gnu -isystem /usr/include -L/usr/lib/x86_64-linux-gnu", "CXX":"zig c++ -target x86_64-linux-gnu -isystem /usr/include -L/usr/lib/x86_64-linux-gnu", "GOARCH":"amd64", "GOOS":"linux"}, tags:[]string(nil), mount:[]command.containerMountPoint{command.containerMountPoint{name:"project", localHost:"/home/redacid/Projects/REDACID/kube-switch", inContainer:"/app"}, command.containerMountPoint{name:"cache", localHost:"/home/redacid/.cache/fyne-cross", inContainer:"/go"}}, DockerImage:"docker.io/fyneio/fyne-cross-images:linux"}, runner:(*command.localContainerEngine)(0xc00015e240)}
 [i] Cleaning target directories...

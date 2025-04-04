@@ -4,6 +4,10 @@ SHELL := /bin/bash
 GOROOT := /home/redacid/go
 GOPATH := /home/redacid/gopath
 APP_NAME := kube-switch
+CMD_PATH := ./cmd/kube-switch
+BUILD_DIR := ./build
+OS := linux
+ARCH := amd64
 
 ICON := internal/pkg/resdata/resources/icon-green.png
 PRJ_REPO := git@github.com:redacid/kube-switch.git
@@ -28,17 +32,47 @@ git-publish:
 	make fyne-cross-build-linux
 	make fyne-cross-build-windows
 	#make git-upload-release
-	make clean-workspace
+	#make clean-workspace
 
+make_build_dir:
+	mkdir -p $(BUILD_DIR)
+
+build_linux: clean-workspace make_build_dir
+	fyne build --release --output $(BUILD_DIR)/$(APP_NAME)_$(OS)_$(ARCH) --target $(OS) --metadata Details.Version=$(RELEASE_VERSION) $(CMD_PATH)
+	chmod +x $(BUILD_DIR)/$(APP_NAME)_$(OS)_$(ARCH)
+
+
+#	$(eval CGO_ENABLED := 1)
+#	$(eval GOCACHE := /go/go-build)
+#	$(eval GOOS := linux)
+#	$(eval GOARCH=amd64
+#	$(eval CC=zig cc
+#	-target x86_64-linux-gnu
+#	-isystem /usr/include
+#	-L/usr/lib/x86_64-linux-gnu
+#	$(eval  CXX := zig c++)
+#	-target x86_64-linux-gnu
+#	-isystem /usr/include
+#	-L/usr/lib/x86_64-linux-gnu
+
+
+.ONESHELL:
+bb:
+	fyne package -os linux -name kube-switch -icon $(ICON) \
+		-app-build 79 -app-version 0.0.2 -app-id redacid.k8s.kube-switch \
+		-metadata Details.Version=0.0.2 -src $(CMD_PATH) -release
+
+build_run_linux: build_linux
+	$(BUILD_DIR)/$(APP_NAME)_$(OS)_$(ARCH)
 
 ## Build Linux binaries | Build
 fyne-cross-build-linux: install_fyne_cross_cmd
-	fyne-cross linux -debug -app-version $(RELEASE_VERSION) -arch amd64,386,arm,arm64 -icon $(ICON) -metadata Details.Version=$(RELEASE_VERSION) \
-		-name $(APP_NAME)
+	fyne-cross linux --app-version $(RELEASE_VERSION) --arch amd64,386,arm,arm64 --icon $(ICON) --metadata Details.Version=$(RELEASE_VERSION) \
+		--name $(APP_NAME) --debug $(CMD_PATH)
 ## Build Windows binaries
 fyne-cross-build-windows: install_fyne_cross_cmd
 	fyne-cross windows -app-version $(RELEASE_VERSION) -arch amd64,386 -icon $(ICON) -metadata Details.Version=$(RELEASE_VERSION) \
-		-name $(APP_NAME) -debug
+		-name $(APP_NAME) -debug $(CMD_PATH)
 
 ## Create release on git | Git
 git-release:

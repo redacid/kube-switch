@@ -8,6 +8,8 @@ https://github.com/FyshOS/fynedesk
 
 https://github.com/golang-standards/project-layout
 
+https://github.com/louislam/dockge
+
 sudo apt install libx11-dev
 
 apt install freeglut3-dev gcc libgl1-mesa-dev xorg-dev libxkbcommon-dev
