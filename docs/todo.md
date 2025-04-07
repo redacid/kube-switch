@@ -26,6 +26,8 @@ go install fyne.io/fyne/v2/cmd/fyne@latest
 
 gh auth login
 
+https://github.com/phracker/MacOSX-SDKs/tree/master
+
 https://gobyexample.com/
 
 https://github.com/kubernetes/community/tree/master/icons

@@ -6,6 +6,7 @@ GOPATH := /home/redacid/gopath
 APP_NAME := kube-switch
 CMD_PATH := ./cmd/kube-switch
 BUILD_DIR := ./build
+MACOS_SDK := /home/redacid/Projects/OriginalProjects/MacOSX-SDKs/MacOSX11.3.sdk
 OS := linux
 ARCH := amd64
 
@@ -41,21 +42,6 @@ build_linux: clean-workspace make_build_dir
 	fyne build --release --output $(BUILD_DIR)/$(APP_NAME)_$(OS)_$(ARCH) --target $(OS) --metadata Details.Version=$(RELEASE_VERSION) $(CMD_PATH)
 	chmod +x $(BUILD_DIR)/$(APP_NAME)_$(OS)_$(ARCH)
 
-
-#	$(eval CGO_ENABLED := 1)
-#	$(eval GOCACHE := /go/go-build)
-#	$(eval GOOS := linux)
-#	$(eval GOARCH=amd64
-#	$(eval CC=zig cc
-#	-target x86_64-linux-gnu
-#	-isystem /usr/include
-#	-L/usr/lib/x86_64-linux-gnu
-#	$(eval  CXX := zig c++)
-#	-target x86_64-linux-gnu
-#	-isystem /usr/include
-#	-L/usr/lib/x86_64-linux-gnu
-
-
 .ONESHELL:
 bb:
 	fyne package -os linux -name kube-switch -icon $(ICON) \
@@ -69,6 +55,12 @@ build_run_linux: build_linux
 fyne-cross-build-linux: install_fyne_cross_cmd
 	fyne-cross linux --app-version $(RELEASE_VERSION) --arch amd64,386,arm,arm64 --icon $(ICON) --metadata Details.Version=$(RELEASE_VERSION) \
 		--name $(APP_NAME) --debug $(CMD_PATH)
+
+## Build Mac binaries | Build
+fyne-cross-build-darwin: install_fyne_cross_cmd
+	fyne-cross darwin --macosx-sdk-path $(MACOS_SDK) --app-version $(RELEASE_VERSION) --arch amd64,arm64 --icon $(ICON) --metadata Details.Version=$(RELEASE_VERSION) \
+		--name $(APP_NAME) --debug $(CMD_PATH)
+
 ## Build Windows binaries
 fyne-cross-build-windows: install_fyne_cross_cmd
 	fyne-cross windows -app-version $(RELEASE_VERSION) -arch amd64,386 -icon $(ICON) -metadata Details.Version=$(RELEASE_VERSION) \
@@ -98,6 +90,8 @@ git-upload-release:
 		if [[ $$dist == *"windows"* ]]; then
 			mv "./fyne-cross/dist/"$$dist"/"$(APP_NAME)".zip" "./fyne-cross/dist/"$$dist"/"$(APP_NAME)_$$dist".zip" 2>/dev/null
 			gh release upload $(RELEASE_VERSION) "./fyne-cross/dist/"$$dist"/"$(APP_NAME)_$$dist".zip" --repo $(PRJ_REPO)
+		elif [[ $$dist == *"darwin"* ]]; then
+			echo "NO PACKAGE"
 		else
 			mv "./fyne-cross/dist/"$$dist"/"$(APP_NAME)".tar.xz" "./fyne-cross/dist/"$$dist"/"$(APP_NAME)_$$dist".tar.xz" 2>/dev/null
 			gh release upload $(RELEASE_VERSION) "./fyne-cross/dist/"$$dist"/"$(APP_NAME)_$$dist".tar.xz" --repo $(PRJ_REPO)
