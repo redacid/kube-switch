@@ -1,39 +1,56 @@
 package main
 
 import (
+	"bytes"
+	"embed" // Імпорт потрібен
 	"errors"
 	"fmt"
-	"io/ioutil"
+	"image"
+	"image/color"
+	"image/draw"
+	"image/png"
 	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
 	"runtime"
-	"sort" // Додано для сортування контекстів
+	"sort"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/fsnotify/fsnotify"
 	"github.com/getlantern/systray"
-	// Залежності Kubernetes client-go
+
+	"golang.org/x/image/font"
+	"golang.org/x/image/font/opentype"
+	"golang.org/x/image/math/fixed"
+
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/tools/clientcmd/api"
-	// Можливо знадобиться для деяких типів, якщо розширювати функціонал
-	// _ "k8s.io/client-go/plugin/pkg/client/auth" // для cloud provider auth
+	// _ "k8s.io/client-go/plugin/pkg/client/auth"
 )
 
+//go:embed DejaVuSans.ttf
+var embeddedFontData []byte
+
+// Хак для компілятора, щоб гарантовано "бачити" використання пакету embed
+var _ embed.FS
+
 const enableDebugLogging = true
-const logPrefix = "KubeContextSwitcher(Go-ClientGo)"
+const logPrefix = "KubeContextSwitcher(Go-ClientGo-DynIcon)"
 const maxContextItems = 30
 const maxTooltipLength = 120
 
-// Константи іконок та міток залишаються ті ж самі
-const iconLoading = "icons/loading.png"
-const iconDefault = "icons/default.png"
-const iconError = "icons/error.png"
-const iconMain = "icons/icon.png"
+const iconSize = 24
+const textMaxLen = 4
+const fontSizePoints = 10.0
+
+var textColor = color.White
+var bgColor = color.Transparent
+
+const kubectlCmd = "kubectl"
 
 const labelLoading = "Завантаження..."
 const labelError = "Помилка"
@@ -42,25 +59,22 @@ const labelNoContext = "Немає контексту"
 var arnRegex = regexp.MustCompile(`^arn:aws:eks:[^:]+:(\d+):cluster\/(.+)$`)
 
 var (
-	// Стан програми
 	currentContext     string
-	kubeconfigFile     string // Тепер це шлях, визначений clientcmd
-	isKubeconfigEnvSet bool   // Визначаємо, чи встановлено змінну KUBECONFIG
+	kubeconfigFile     string
+	isKubeconfigEnvSet bool
 	loadingRules       clientcmd.ClientConfigLoadingRules
+	parsedFont         *opentype.Font
 	stateMu            sync.RWMutex
 
-	// Стан UI (меню)
 	currentContextItem *systray.MenuItem
 	contextMenuItems   []*systray.MenuItem
 	menuItemContexts   map[*systray.MenuItem]string
 	menuMu             sync.Mutex
 
-	// Моніторинг файлу
 	watcher     *fsnotify.Watcher
 	watcherDone chan bool
 )
 
-// --- Логування ---
 func logDebug(format string, v ...interface{}) {
 	if enableDebugLogging {
 		log.Printf(logPrefix+" [DEBUG]: "+format, v...)
@@ -70,122 +84,88 @@ func logInfo(format string, v ...interface{})    { log.Printf(logPrefix+" [INFO]
 func logWarning(format string, v ...interface{}) { log.Printf(logPrefix+" [WARN]: "+format, v...) }
 func logError(format string, v ...interface{})   { log.Printf(logPrefix+" [ERROR]: "+format, v...) }
 
-// --- Робота з конфігурацією через clientcmd ---
-
-// Завантажує повну конфігурацію kubeconfig
 func loadKubeConfig() (*api.Config, string, error) {
 	stateMu.RLock()
-	rules := loadingRules // Використовуємо глобально визначені правила
+	rules := loadingRules
 	stateMu.RUnlock()
-
 	configPath := rules.GetDefaultFilename()
 	logDebug("Спроба завантаження конфігурації з: %s", configPath)
-
 	config, err := clientcmd.LoadFromFile(configPath)
 	if err != nil {
 		logError("Не вдалося завантажити kubeconfig з '%s': %v", configPath, err)
-		// Перевіряємо, чи помилка пов'язана з відсутністю файлу
 		if os.IsNotExist(err) {
 			return nil, configPath, fmt.Errorf("файл конфігурації не знайдено: %s", configPath)
 		}
 		return nil, configPath, fmt.Errorf("помилка завантаження '%s': %w", configPath, err)
 	}
-
 	logDebug("Kubeconfig '%s' успішно завантажено.", configPath)
 	return config, configPath, nil
 }
 
-// Отримує поточний контекст з конфігурації
 func getCurrentContext() (string, error) {
 	logDebug("Отримання поточного контексту через clientcmd...")
 	config, _, err := loadKubeConfig()
 	if err != nil {
-		// Якщо конфіг не завантажено, контексту немає (або є помилка)
-		return "", err // Повертаємо помилку завантаження
+		return "", err
 	}
-
 	if config.CurrentContext == "" {
-		logDebug("Поле CurrentContext у конфігурації порожнє.")
-		return "", nil // Не помилка, просто не встановлено
+		logDebug("Поле CurrentContext порожнє.")
+		return "", nil
 	}
-
-	// Перевіряємо, чи існує такий контекст у списку
 	if _, exists := config.Contexts[config.CurrentContext]; !exists {
-		logWarning("Поточний контекст '%s' вказано, але його немає у списку контекстів!", config.CurrentContext)
-		// Можна повернути помилку або вважати, що контексту немає
-		return "", fmt.Errorf("поточний контекст '%s' не знайдено у конфігурації", config.CurrentContext)
+		logWarning("Поточний контекст '%s' вказано, але його немає у списку!", config.CurrentContext)
+		return "", fmt.Errorf("поточний контекст '%s' не знайдено", config.CurrentContext)
 	}
-
-	logDebug("Поточний контекст з конфігурації: %s", config.CurrentContext)
+	logDebug("Поточний контекст: %s", config.CurrentContext)
 	return config.CurrentContext, nil
 }
 
-// Отримує список імен усіх контекстів з конфігурації
 func getContexts() ([]string, error) {
 	logDebug("Отримання списку контекстів через clientcmd...")
 	config, _, err := loadKubeConfig()
 	if err != nil {
-		return nil, err // Повертаємо помилку завантаження
+		return nil, err
 	}
-
 	if len(config.Contexts) == 0 {
-		logInfo("У конфігурації не знайдено жодного контексту.")
+		logInfo("У конфігурації не знайдено контекстів.")
 		return []string{}, nil
 	}
-
 	contexts := make([]string, 0, len(config.Contexts))
 	for name := range config.Contexts {
 		contexts = append(contexts, name)
 	}
-
-	// Сортуємо для стабільного порядку в меню
 	sort.Strings(contexts)
-
 	logDebug("Знайдено та відсортовано контекстів: %v", contexts)
 	return contexts, nil
 }
 
-// Перемикає поточний контекст у файлі конфігурації
 func switchContext(contextName string) error {
 	logDebug("Перемикання на контекст '%s' через clientcmd...", contextName)
-
-	config, configPath, err := loadKubeConfig() // Завантажуємо поточну конфігурацію
+	config, configPath, err := loadKubeConfig()
 	if err != nil {
-		logError("Не вдалося завантажити конфігурацію для перемикання контексту: %v", err)
-		return fmt.Errorf("неможливо завантажити конфіг для зміни: %w", err)
+		logError("Не вдалося завантажити конфіг для перемикання: %v", err)
+		return fmt.Errorf("неможливо завантажити конфіг: %w", err)
 	}
-
-	// Перевіряємо, чи існує контекст, на який перемикаємось
 	if _, exists := config.Contexts[contextName]; !exists {
 		logError("Спроба перемкнутись на неіснуючий контекст: %s", contextName)
-		return fmt.Errorf("контекст '%s' не знайдено у конфігурації", contextName)
+		return fmt.Errorf("контекст '%s' не знайдено", contextName)
 	}
-
-	// Перевіряємо, чи справді потрібно щось змінювати
 	if config.CurrentContext == contextName {
-		logInfo("Контекст '%s' вже є поточним. Перемикання не потрібне.", contextName)
-		return nil // Нічого не робимо
+		logInfo("Контекст '%s' вже поточний.", contextName)
+		return nil
 	}
-
-	// Змінюємо поточний контекст у завантаженій структурі
 	config.CurrentContext = contextName
-	logDebug("Встановлено CurrentContext = '%s' у структурі.", contextName)
-
-	// Записуємо змінену конфігурацію назад у файл
-	// Використовуємо WriteToFile для простоти. Вона перезаписує файл.
-	// Потрібно бути обережним з правами доступу та можливими race conditions.
-	logDebug("Спроба зберегти змінену конфігурацію у файл: %s", configPath)
+	logDebug("Встановлено CurrentContext = '%s'", contextName)
+	logDebug("Збереження змін у файл: %s", configPath)
 	err = clientcmd.WriteToFile(*config, configPath)
 	if err != nil {
-		logError("Не вдалося записати змінену конфігурацію у файл '%s': %v", configPath, err)
+		logError("Не вдалося записати зміни у '%s': %v", configPath, err)
 		return fmt.Errorf("помилка збереження конфігурації: %w", err)
 	}
-
-	logInfo("Успішно перемкнено поточний контекст на '%s' у файлі %s", contextName, configPath)
+	logInfo("Успішно перемкнено на '%s' у %s", contextName, configPath)
 	return nil
 }
 
-// --- Логіка відображення ---
 func getDisplayName(contextName string) string {
 	if contextName == "" {
 		return labelNoContext
@@ -201,28 +181,109 @@ func getDisplayName(contextName string) string {
 	return contextName
 }
 
-// --- Оновлення UI (Systray) ---
-// (Логіка Hide/Show залишається, але джерело даних змінилося)
+func truncateString(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	runes := []rune(s)
+	if len(runes) <= n {
+		return s
+	}
+	return string(runes[:n])
+}
+
+func generateIcon(text string) ([]byte, error) {
+	if parsedFont == nil {
+		return nil, errors.New("шрифт не завантажено")
+	}
+
+	displayText := strings.ToUpper(truncateString(text, textMaxLen))
+	if displayText == "" {
+		displayText = "?"
+	}
+
+	face, err := opentype.NewFace(parsedFont, &opentype.FaceOptions{
+		Size:    fontSizePoints,
+		DPI:     72,
+		Hinting: font.HintingFull,
+	})
+	if err != nil {
+		logError("Не вдалося створити лице шрифту: %v", err)
+		return nil, fmt.Errorf("помилка створення шрифту: %w", err)
+	}
+	defer face.Close()
+
+	img := image.NewRGBA(image.Rect(0, 0, iconSize, iconSize))
+	draw.Draw(img, img.Bounds(), image.Transparent, image.Point{}, draw.Src)
+
+	advance := font.MeasureString(face, displayText)
+	metrics := face.Metrics()
+
+	textWidth := int(advance.Ceil())
+	textHeight := int((metrics.Ascent + metrics.Descent).Ceil())
+
+	xPos := (iconSize - textWidth) / 2
+	yPos := (iconSize / 2) - (textHeight / 2) + int(metrics.Ascent.Ceil())
+
+	point := fixed.Point26_6{
+		X: fixed.Int26_6(xPos * 64),
+		Y: fixed.Int26_6(yPos * 64),
+	}
+
+	d := &font.Drawer{
+		Dst:  img,
+		Src:  image.NewUniform(textColor),
+		Face: face,
+		Dot:  point,
+	}
+	d.DrawString(displayText)
+	logDebug("Намальовано текст '%s' на іконці %dx%d", displayText, iconSize, iconSize)
+
+	var buf bytes.Buffer
+	err = png.Encode(&buf, img)
+	if err != nil {
+		logError("Не вдалося закодувати іконку в PNG: %v", err)
+		return nil, fmt.Errorf("помилка кодування PNG: %w", err)
+	}
+
+	return buf.Bytes(), nil
+}
+
 func updateSystrayUI() {
-	logDebug("Оновлення UI systray (Client-Go)...")
+	logDebug("Оновлення UI systray (Client-Go / DynIcon)...")
 
 	stateMu.RLock()
 	ctx := currentContext
-	cfgFile := kubeconfigFile // Використовуємо шлях, визначений clientcmd
+	cfgFile := kubeconfigFile
 	cfgEnvSet := isKubeconfigEnvSet
 	stateMu.RUnlock()
 
 	displayName := getDisplayName(ctx)
 	systray.SetTitle(displayName)
-	setIcon(iconMain)
 
-	// --- Встановлення Tooltip ---
+	var iconBytes []byte
+	var genErr error
+	if ctx != "" {
+		iconBytes, genErr = generateIcon(ctx)
+	} else {
+		iconBytes, genErr = generateIcon(labelNoContext)
+	}
+
+	if genErr != nil {
+		logError("Помилка генерації динамічної іконки: %v", genErr)
+	}
+
+	if iconBytes != nil {
+		systray.SetIcon(iconBytes)
+	} else {
+		logWarning("Згенеровані байти іконки порожні.")
+	}
+
 	tooltip := labelNoContext
 	var configPathDesc string
 	if cfgEnvSet {
 		configPathDesc = fmt.Sprintf("Конфіг (KUBECONFIG):\n%s\n(Авто-оновлення ВИМК.)", cfgFile)
 	} else {
-		// Якщо KUBECONFIG не встановлено, cfgFile буде стандартним шляхом
 		configPathDesc = fmt.Sprintf("Конфіг (Дефолт):\n%s\n(Авто-оновлення УВІМК.)", cfgFile)
 	}
 	if ctx != "" {
@@ -235,7 +296,6 @@ func updateSystrayUI() {
 	}
 	systray.SetTooltip(tooltip)
 
-	// --- Оновлення пункту для поточного контексту ---
 	if currentContextItem != nil {
 		if ctx != "" {
 			currentContextItem.SetTitle(fmt.Sprintf("✓ %s", displayName))
@@ -250,28 +310,22 @@ func updateSystrayUI() {
 		logError("currentContextItem is nil during update!")
 	}
 
-	// --- Оновлення списку доступних контекстів ---
-	allContexts, err := getContexts() // Тепер використовує clientcmd
+	allContexts, err := getContexts()
 	if err != nil {
-		// Показуємо помилку завантаження конфігурації
 		logError("Не вдалося отримати контексти для меню (client-go): %v", err)
-		// Приховуємо всі пункти контекстів та очищуємо мапу
 		menuMu.Lock()
 		for _, item := range contextMenuItems {
 			item.Hide()
 			delete(menuItemContexts, item)
 		}
 		menuMu.Unlock()
-		// Можна додати пункт меню з помилкою
 	} else {
 		if len(allContexts) > maxContextItems {
 			logWarning("Кількість контекстів (%d) перевищує ліміт меню (%d).", len(allContexts), maxContextItems)
 		}
-
 		menuMu.Lock()
 		processedItems := 0
 		clear(menuItemContexts)
-
 		for _, c := range allContexts {
 			if c == ctx {
 				continue
@@ -279,7 +333,6 @@ func updateSystrayUI() {
 			if processedItems >= maxContextItems {
 				break
 			}
-
 			item := contextMenuItems[processedItems]
 			item.SetTitle(fmt.Sprintf("  %s", getDisplayName(c)))
 			item.SetTooltip(fmt.Sprintf("Перемкнути на: %s", c))
@@ -287,7 +340,6 @@ func updateSystrayUI() {
 			item.Show()
 			processedItems++
 		}
-
 		for i := processedItems; i < len(contextMenuItems); i++ {
 			item := contextMenuItems[i]
 			item.Hide()
@@ -295,48 +347,47 @@ func updateSystrayUI() {
 		}
 		menuMu.Unlock()
 	}
-	logDebug("UI Systray оновлено (Client-Go)")
+	logDebug("UI Systray оновлено (Client-Go / DynIcon)")
 }
 
-// Безпечно оновлює стан і викликає оновлення UI
 func refreshState() {
-	logDebug("Оновлення стану (client-go)...")
-	setIcon(iconLoading)
+	logDebug("Оновлення стану (client-go / DynIcon)...")
+	loadingIconBytes, _ := generateIcon("...")
+	if loadingIconBytes != nil {
+		systray.SetIcon(loadingIconBytes)
+	}
 	systray.SetTitle(labelLoading)
 	systray.SetTooltip("Оновлення контексту...")
 
-	// Отримуємо новий контекст, використовуючи clientcmd
-	newContext, err := getCurrentContext() // Викликає loadKubeConfig всередині
+	newContext, err := getCurrentContext()
 
-	stateMu.Lock() // Блокуємо стан для запису
+	stateMu.Lock()
 	refreshNeeded := false
 
 	if err != nil {
-		// Обробляємо помилки завантаження/парсингу конфігу
 		logError("Помилка оновлення поточного контексту (client-go): %v", err)
-		// Вважаємо, що контекст невідомий
 		if currentContext != "" {
-			logInfo("Контекст скинуто через помилку оновлення.")
+			logInfo("Контекст скинуто через помилку.")
 			currentContext = ""
 			refreshNeeded = true
 		}
-		// Зберігаємо помилку для показу? Поки що просто скидаємо контекст.
 		stateMu.Unlock()
-		setIcon(iconError)
+		errorIconBytes, _ := generateIcon("ERR")
+		if errorIconBytes != nil {
+			systray.SetIcon(errorIconBytes)
+		}
 		systray.SetTitle(labelError)
-		systray.SetTooltip(fmt.Sprintf("Помилка оновлення: %v", err)) // Показуємо помилку в tooltip
-		updateSystrayUI()                                             // Оновити меню (покаже помилку/порожній список)
+		systray.SetTooltip(fmt.Sprintf("Помилка: %v", err))
+		updateSystrayUI()
 		return
 	}
 
-	// Перевіряємо, чи контекст справді змінився
 	if newContext != currentContext {
 		logInfo("Контекст змінився з '%s' на '%s'", currentContext, newContext)
 		currentContext = newContext
 		refreshNeeded = true
 	} else {
 		logDebug("Контекст не змінився ('%s')", currentContext)
-		// Все одно оновлюємо UI, бо список контекстів міг змінитися
 		refreshNeeded = true
 	}
 	stateMu.Unlock()
@@ -346,64 +397,58 @@ func refreshState() {
 	}
 }
 
-// Обробляє клік на пункті меню контексту
 func handleContextSwitchClick(contextName string) {
-	logDebug("Обробка кліку для перемикання на '%s' (client-go)", contextName)
-	setIcon(iconLoading)
+	logDebug("Обробка кліку для перемикання на '%s' (client-go / DynIcon)", contextName)
+	loadingIconBytes, _ := generateIcon("...")
+	if loadingIconBytes != nil {
+		systray.SetIcon(loadingIconBytes)
+	}
 	systray.SetTooltip("Перемикання контексту...")
 
-	err := switchContext(contextName) // Тепер використовує clientcmd
+	err := switchContext(contextName)
 	if err != nil {
 		logError("Помилка перемикання контексту (client-go) на '%s': %v", contextName, err)
-		// Показуємо помилку користувачу
-		systray.SetTooltip(fmt.Sprintf("Помилка перемикання: %v", err))
-		// Можна додати сповіщення
-		time.Sleep(3 * time.Second) // Затримка, щоб побачити tooltip
+		systray.SetTooltip(fmt.Sprintf("Помилка: %v", err))
+		time.Sleep(3 * time.Second)
 	}
-	// Завжди оновлюємо стан та UI після спроби перемикання
 	refreshState()
 }
 
-// --- Моніторинг файлу ---
-// (Логіка залишається та сама, але kubeconfigFile визначається інакше)
 func setupFileWatcher() {
 	stateMu.RLock()
-	cfgFile := kubeconfigFile // Використовуємо шлях, визначений loadingRules
+	cfgFile := kubeconfigFile
 	cfgEnvSet := isKubeconfigEnvSet
 	stateMu.RUnlock()
-
 	if cfgEnvSet {
-		logInfo("Встановлено KUBECONFIG. Моніторинг файлу вимкнено.")
+		logInfo("KUBECONFIG встановлено. Моніторинг вимкнено.")
 		return
 	}
 	if cfgFile == "" {
-		logError("Неможливо налаштувати моніторинг: шлях до kubeconfig порожній.")
+		logError("Неможливо моніторити: шлях порожній.")
 		return
 	}
-
 	var err error
 	watcher, err = fsnotify.NewWatcher()
 	if err != nil {
-		logError("Не вдалося створити file watcher: %v", err)
+		logError("Не вдалося створити watcher: %v", err)
 		return
 	}
 	watchDir := filepath.Dir(cfgFile)
 	if _, err := os.Stat(watchDir); os.IsNotExist(err) {
-		logError("Директорія для моніторингу '%s' не існує.", watchDir)
+		logError("Директорія '%s' не існує.", watchDir)
 		watcher.Close()
 		watcher = nil
 		return
 	}
 	err = watcher.Add(watchDir)
 	if err != nil {
-		logError("Не вдалося додати шлях '%s' до file watcher: %v", watchDir, err)
+		logError("Не вдалося додати '%s' до watcher: %v", watchDir, err)
 		watcher.Close()
 		watcher = nil
 		return
 	}
-	logInfo("Запущено моніторинг директорії: %s (відстеження змін у %s)", watchDir, filepath.Base(cfgFile))
+	logInfo("Моніторинг: %s (зміни у %s)", watchDir, filepath.Base(cfgFile))
 	watcherDone = make(chan bool)
-
 	go func() {
 		debounceTimer := time.NewTimer(time.Hour)
 		debounceTimer.Stop()
@@ -418,7 +463,7 @@ func setupFileWatcher() {
 				logDebug("Подія watcher: Name: %s, Op: %s", event.Name, event.Op)
 				stateMu.RLock()
 				currentCfgFile := kubeconfigFile
-				stateMu.RUnlock() // Перевіряємо актуальний шлях
+				stateMu.RUnlock()
 				if filepath.Clean(event.Name) == filepath.Clean(currentCfgFile) {
 					if event.Has(fsnotify.Write) || event.Has(fsnotify.Create) || event.Has(fsnotify.Rename) || event.Has(fsnotify.Remove) {
 						logDebug("Зміна %s. Перезапуск debounce.", currentCfgFile)
@@ -437,10 +482,10 @@ func setupFileWatcher() {
 				}
 				logError("Помилка watcher: %v", err)
 			case <-debounceTimer.C:
-				logInfo("Debounce timer. Оновлення стану через зміну файлу.")
+				logInfo("Debounce timer. Оновлення стану.")
 				refreshState()
 			case <-watcherDone:
-				logInfo("Зупинка file watcher.")
+				logInfo("Зупинка горутини file watcher.")
 				watcher.Close()
 				debounceTimer.Stop()
 				return
@@ -459,51 +504,25 @@ func stopFileWatcher() {
 		}
 		watcher = nil
 		watcherDone = nil
-		logInfo("File watcher зупинено.")
+		logInfo("Watcher зупинено.")
 	}
 }
 
-// --- Допоміжні функції ---
-
-// Визначає правила завантаження та ефективний шлях до kubeconfig
 func initializeLoadingRules() {
 	stateMu.Lock()
 	defer stateMu.Unlock()
-
 	loadingRules = *clientcmd.NewDefaultClientConfigLoadingRules()
-	kubeconfigFile = loadingRules.GetDefaultFilename() // Отримуємо ефективний шлях
-
-	// Перевіряємо, чи використовується змінна KUBECONFIG
+	kubeconfigFile = loadingRules.GetDefaultFilename()
 	if os.Getenv(clientcmd.RecommendedConfigPathEnvVar) != "" {
-		logDebug("Використовується змінна середовища %s", clientcmd.RecommendedConfigPathEnvVar)
+		logDebug("Використовується %s", clientcmd.RecommendedConfigPathEnvVar)
 		isKubeconfigEnvSet = true
 	} else {
-		logDebug("Змінна %s не встановлена, використовується стандартний шлях: %s", clientcmd.RecommendedConfigPathEnvVar, kubeconfigFile)
+		logDebug("%s не встановлено, стандартний шлях: %s", clientcmd.RecommendedConfigPathEnvVar, kubeconfigFile)
 		isKubeconfigEnvSet = false
 	}
-	logInfo("Ефективний шлях kubeconfig: %s (KUBECONFIG встановлено: %v)", kubeconfigFile, isKubeconfigEnvSet)
+	logInfo("Ефективний шлях kubeconfig: %s (KUBECONFIG: %v)", kubeconfigFile, isKubeconfigEnvSet)
 }
 
-// Видалено checkKubectlExists
-
-func loadIcon(path string) []byte {
-	logDebug("Завантаження іконки: %s", path)
-	data, err := ioutil.ReadFile(path)
-	if err != nil {
-		logError("Не вдалося завантажити '%s': %v", path, err)
-		return nil
-	}
-	logDebug("Іконку '%s' завантажено (%d байт).", path, len(data))
-	return data
-}
-func setIcon(path string) {
-	iconBytes := loadIcon(path)
-	if iconBytes != nil {
-		systray.SetIcon(iconBytes)
-	} else {
-		logError("Не вдалося встановити іконку: дані порожні (%s)", path)
-	}
-}
 func openKubeFolder() {
 	stateMu.RLock()
 	cfgFile := kubeconfigFile
@@ -517,7 +536,7 @@ func openKubeFolder() {
 		}
 		dir = filepath.Join(home, ".kube")
 	}
-	logDebug("Спроба відкрити папку: %s", dir)
+	logDebug("Спроба відкрити: %s", dir)
 	var cmd *exec.Cmd
 	switch goos := runtime.GOOS; goos {
 	case "linux":
@@ -536,42 +555,68 @@ func openKubeFolder() {
 	}
 }
 
-// --- Головна логіка програми (Systray) ---
+func parseEmbeddedFont() error {
+	if len(embeddedFontData) == 0 {
+		logError("Критично: Дані вбудованого шрифту порожні! Переконайтесь, що файл шрифту існує і директива embed правильна.")
+		return errors.New("дані вбудованого шрифту порожні")
+	}
+	var err error
+	parsedFont, err = opentype.Parse(embeddedFontData)
+	if err != nil {
+		logError("Критично: Не вдалося розпарсити вбудований шрифт: %v", err)
+		return fmt.Errorf("помилка парсингу шрифту: %w", err)
+	}
+	logInfo("Вбудований шрифт успішно розпарсено.")
+	return nil
+}
 
 func onReady() {
 	logInfo("Systray готовий. Версія Go: %s", runtime.Version())
 	systray.SetTitle(labelLoading)
 	systray.SetTooltip(labelLoading)
-	setIcon(iconLoading)
 
-	// Ініціалізуємо правила завантаження конфігурації
+	if err := parseEmbeddedFont(); err != nil {
+		systray.SetTitle(labelError)
+		systray.SetTooltip(fmt.Sprintf("Помилка шрифту: %v", err))
+		systray.AddMenuItem("Помилка завантаження шрифту!", err.Error())
+		mQuit := systray.AddMenuItem("Вийти", "Exit")
+		go func() { <-mQuit.ClickedCh; systray.Quit() }()
+		return
+	}
+
+	loadingIconBytes, _ := generateIcon("...")
+	if loadingIconBytes != nil {
+		systray.SetIcon(loadingIconBytes)
+	}
+
 	initializeLoadingRules()
-	// Ініціалізація мапи для меню
 	menuItemContexts = make(map[*systray.MenuItem]string)
 
-	// Перевірка: чи можемо ми взагалі завантажити конфіг?
 	_, checkPath, checkErr := loadKubeConfig()
 	if checkErr != nil {
-		// Не фатальна помилка, якщо файл просто не існує, але покажемо це
-		logWarning("Початкова перевірка kubeconfig не вдалася: %v", checkErr)
-		if errors.Is(checkErr, os.ErrNotExist) || strings.Contains(checkErr.Error(), "файл конфігурації не знайдено") {
+		logWarning("Початкова перевірка kubeconfig: %v", checkErr)
+		if errors.Is(checkErr, os.ErrNotExist) || strings.Contains(checkErr.Error(), "не знайдено") {
+			errorIconBytes, _ := generateIcon("?")
+			if errorIconBytes != nil {
+				systray.SetIcon(errorIconBytes)
+			}
 			systray.SetTitle(labelNoContext)
-			systray.SetTooltip(fmt.Sprintf("Файл конфігурації не знайдено:\n%s", checkPath))
-			setIcon(iconError) // Можна використати іконку попередження
+			systray.SetTooltip(fmt.Sprintf("Файл не знайдено:\n%s", checkPath))
 		} else {
+			errorIconBytes, _ := generateIcon("ERR")
+			if errorIconBytes != nil {
+				systray.SetIcon(errorIconBytes)
+			}
 			systray.SetTitle(labelError)
-			systray.SetTooltip(fmt.Sprintf("Помилка завантаження конфігурації:\n%v", checkErr))
-			setIcon(iconError)
+			systray.SetTooltip(fmt.Sprintf("Помилка конфігу:\n%v", checkErr))
 		}
-		// Додаємо мінімальне меню для виходу
-		systray.AddMenuItem(fmt.Sprintf("Помилка: %v", checkErr), "Помилка завантаження kubeconfig")
+		systray.AddMenuItem(fmt.Sprintf("Помилка: %v", checkErr), "Помилка kubeconfig")
 		systray.AddSeparator()
 		mQuit := systray.AddMenuItem("Вийти", "Exit")
 		go func() { <-mQuit.ClickedCh; systray.Quit() }()
-		return // Не продовжуємо створення повного меню
+		return
 	}
 
-	// --- Створення пунктів меню ---
 	currentContextItem = systray.AddMenuItem(labelLoading, "Поточний контекст Kubernetes")
 	systray.AddSeparator()
 	contextMenuItems = make([]*systray.MenuItem, 0, maxContextItems)
@@ -579,7 +624,7 @@ func onReady() {
 		item := systray.AddMenuItem(fmt.Sprintf("placeholder_%d", i), "")
 		item.Hide()
 		contextMenuItems = append(contextMenuItems, item)
-		go func(menuItem *systray.MenuItem) { // Горутина обробника кліків
+		go func(menuItem *systray.MenuItem) {
 			for range menuItem.ClickedCh {
 				menuMu.Lock()
 				contextName, ok := menuItemContexts[menuItem]
@@ -587,7 +632,7 @@ func onReady() {
 				if ok && contextName != "" {
 					handleContextSwitchClick(contextName)
 				} else {
-					logDebug("Клік на пункт меню без контексту?")
+					logDebug("Клік на пункт без контексту?")
 				}
 			}
 			logDebug("Горутина обробника кліків завершується.")
@@ -595,9 +640,9 @@ func onReady() {
 	}
 	systray.AddSeparator()
 	mRefresh := systray.AddMenuItem("Оновити", "Перезавантажити список та поточний контекст")
-	mOpenFolder := systray.AddMenuItem("Відкрити папку конфігурації", "Відкрити папку, де лежить активний kubeconfig") // Змінено текст
+	mOpenFolder := systray.AddMenuItem("Відкрити папку конфігурації", "Відкрити папку, де лежить активний kubeconfig")
 	mQuit := systray.AddMenuItem("Вийти", "Завершити програму")
-	go func() { // Горутина для статичних пунктів
+	go func() {
 		for {
 			select {
 			case <-mRefresh.ClickedCh:
@@ -614,8 +659,8 @@ func onReady() {
 		}
 	}()
 
-	refreshState()     // Початкове оновлення стану та UI
-	setupFileWatcher() // Запуск моніторингу файлу
+	refreshState()
+	setupFileWatcher()
 }
 
 func onExit() {
@@ -624,11 +669,10 @@ func onExit() {
 	logInfo("Очищення завершено.")
 }
 
-// --- Точка входу ---
 func main() {
 	log.SetFlags(log.Ldate | log.Ltime)
-	logInfo("Запуск KubeContextSwitcher(Go-ClientGo)...")
+	logInfo("Запуск KubeContextSwitcher(Go-ClientGo-DynIcon)...")
 	logInfo("Версія Go: %s", runtime.Version())
-	systray.Run(onReady, onExit) // Запуск systray (блокуючий)
-	logInfo("KubeContextSwitcher(Go-ClientGo) завершено.")
+	systray.Run(onReady, onExit)
+	logInfo("KubeContextSwitcher(Go-ClientGo-DynIcon) завершено.")
 }
