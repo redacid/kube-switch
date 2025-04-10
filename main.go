@@ -2,253 +2,562 @@ package main
 
 import (
 	"fmt"
-	"fyne.io/fyne/v2"
-	"fyne.io/fyne/v2/app"
-	"fyne.io/fyne/v2/container"
-	"fyne.io/fyne/v2/driver/desktop"
-	"fyne.io/fyne/v2/widget"
-	"github.com/fsnotify/fsnotify"
-	"github.com/gen2brain/beeep"
-	"github.com/redacid/kube-switch/pkg/resdata"
-	"k8s.io/client-go/tools/clientcmd"
-	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
+	"io/ioutil"
 	"log"
-	"sort"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"regexp"
+	"runtime"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/fsnotify/fsnotify"
+	"github.com/getlantern/systray"
 )
 
-type useContextOptions struct {
-	configAccess clientcmd.ConfigAccess
-	contextName  string
-}
+const enableDebugLogging = true
+const logPrefix = "KubeContextSwitcher(Go)"
+const maxContextItems = 30
+const maxTooltipLength = 120
+
+const kubectlCmd = "kubectl"
+
+const iconLoading = "icons/icon.png"
+const iconDefault = "icons/icon.png"
+const iconError = "icons/icon.png"
+const iconMain = "icons/icon.png"
+
+const labelLoading = "Завантаження..."
+const labelError = "Помилка"
+const labelNoContext = "Немає контексту"
+
+var arnRegex = regexp.MustCompile(`^arn:aws:eks:[^:]+:(\d+):cluster\/(.+)$`)
 
 var (
-	cfg            *clientcmdapi.Config
-	contextData    []string
-	currentContext string
-	originFilename string
-	pathOptions    = clientcmd.NewDefaultPathOptions()
-	options        = &useContextOptions{configAccess: pathOptions}
-	myApp          = app.NewWithID("redacid.k8s.kube-switch")
-	desk           = myApp.(desktop.App)
-	myWindow       = myApp.NewWindow("K8S Contexts")
-	hbox           *fyne.Container
-	list           *widget.List
-	btnSetContext  *widget.Button
-	menu           = fyne.NewMenu("Systray menu")
+	currentContext     string
+	kubeconfigFile     string
+	isKubeconfigEnvSet bool
+	stateMu            sync.RWMutex
+
+	currentContextItem *systray.MenuItem
+	contextMenuItems   []*systray.MenuItem
+	menuItemContexts   map[*systray.MenuItem]string
+	menuMu             sync.Mutex
+
+	watcher     *fsnotify.Watcher
+	watcherDone chan bool
 )
 
-func readConfig(from string) {
-	//cfg = clientcmd.GetConfigFromFileOrDie(cfgFile)
-	cfg, _ = options.configAccess.GetStartingConfig()
-	currentContext = cfg.CurrentContext
-	originFilename = options.configAccess.GetDefaultFilename()
-	contextData = nil
-	for k := range cfg.Contexts {
-		contextData = append(contextData, k)
+func logDebug(format string, v ...interface{}) {
+	if enableDebugLogging {
+		log.Printf(logPrefix+" [DEBUG]: "+format, v...)
 	}
-	sort.Strings(contextData)
-	log.Printf("readConfig From: %s", from)
-	//printConfigData()
 }
 
-func refreshList(from string) {
-	menu.Items = nil
-	setTrayMenu("refeshList")
-	desk.SetSystemTrayMenu(menu)
-
-	btnSetContext.Hide()
-	list.Refresh()
-	for i := 0; i < list.Length(); i++ {
-		list.RefreshItem(i)
-	}
-	hbox.Refresh()
-	log.Printf("refreshList From: %s", from)
+func logInfo(format string, v ...interface{}) {
+	log.Printf(logPrefix+" [INFO]: "+format, v...)
 }
 
-func sendNotification(t string, m string) {
-	err := beeep.Notify(t, m, "")
+func logWarning(format string, v ...interface{}) {
+	log.Printf(logPrefix+" [WARN]: "+format, v...)
+}
+
+func logError(format string, v ...interface{}) {
+	log.Printf(logPrefix+" [ERROR]: "+format, v...)
+}
+
+func runKubectl(args ...string) (string, string, error) {
+	cmd := exec.Command(kubectlCmd, args...)
+	logDebug("Виконую kubectl: %v", cmd.Args)
+	var stdout, stderr strings.Builder
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	err := cmd.Run()
+	stdoutStr := strings.TrimSpace(stdout.String())
+	stderrStr := strings.TrimSpace(stderr.String())
 	if err != nil {
-		panic(err)
+		errMsg := fmt.Sprintf("команда '%s' не вдалася: %v. Stderr: %s", strings.Join(cmd.Args, " "), err, stderrStr)
+		logDebug("Помилка команди kubectl. Stderr: %s, Error: %v", stderrStr, err)
+		return stdoutStr, stderrStr, fmt.Errorf(errMsg)
 	}
+	logDebug("Команда kubectl успішна. Stdout: %s", stdoutStr)
+	if stderrStr != "" {
+		logDebug("Команда kubectl успішна зі stderr: %s", stderrStr)
+	}
+	return stdoutStr, stderrStr, nil
 }
 
-func setCurrentContext(contextName string) {
-	cfgNew, _ := options.configAccess.GetStartingConfig()
-	cfgNew.CurrentContext = contextName
-	err := clientcmd.ModifyConfig(options.configAccess, *cfgNew, true)
+func getCurrentContext() (string, error) {
+	logDebug("Отримання поточного контексту...")
+	stdout, stderr, err := runKubectl("config", "current-context")
 	if err != nil {
-		log.Printf("Error change context to %v: %v\n ", contextName, err)
+		if strings.Contains(stderr, "current-context is not set") || stdout == "" {
+			logDebug("Поточний контекст не встановлено.")
+			return "", nil
+		}
+		logError("Не вдалося отримати поточний контекст: %v", err)
+		return "", fmt.Errorf("не вдалося отримати поточний контекст: %w", err)
+	}
+	return stdout, nil
+}
+
+func getContexts() ([]string, error) {
+	logDebug("Отримання всіх контекстів...")
+	stdout, _, err := runKubectl("config", "get-contexts", "-o", "name")
+	if err != nil {
+		logError("Не вдалося отримати контексти: %v", err)
+		return nil, fmt.Errorf("не вдалося отримати контексти: %w", err)
+	}
+	if stdout == "" {
+		logInfo("Контексти не знайдено.")
+		return []string{}, nil
+	}
+	contextsRaw := strings.Split(stdout, "\n")
+	contexts := make([]string, 0, len(contextsRaw))
+	for _, c := range contextsRaw {
+		if trimmed := strings.TrimSpace(c); trimmed != "" {
+			contexts = append(contexts, trimmed)
+		}
+	}
+	logDebug("Знайдено контекстів: %v", contexts)
+	return contexts, nil
+}
+
+func switchContext(contextName string) error {
+	logDebug("Перемикання на контекст '%s'...", contextName)
+	_, stderr, err := runKubectl("config", "use-context", contextName)
+	if err != nil {
+		logError("Не вдалося перемкнути контекст на '%s': %v", contextName, err)
+		return fmt.Errorf("не вдалося перемкнути на '%s': %w. Stderr: %s", contextName, err, stderr)
+	}
+	logInfo("Перемкнено контекст на '%s'", contextName)
+	return nil
+}
+
+func getDisplayName(contextName string) string {
+	if contextName == "" {
+		return labelNoContext
+	}
+	match := arnRegex.FindStringSubmatch(contextName)
+	if len(match) == 3 && match[1] != "" && match[2] != "" {
+		return fmt.Sprintf("%s:%s", match[1], match[2])
+	}
+	const maxLen = 40
+	if len(contextName) > maxLen {
+		return contextName[:maxLen-3] + "..."
+	}
+	return contextName
+}
+
+func updateSystrayUI() {
+	logDebug("Оновлення UI systray (Hide/Show)...")
+
+	stateMu.RLock()
+	ctx := currentContext
+	cfgFile := kubeconfigFile
+	cfgEnvSet := isKubeconfigEnvSet
+	stateMu.RUnlock()
+
+	displayName := getDisplayName(ctx)
+	systray.SetTitle(displayName)
+	setIcon(iconMain)
+
+	tooltip := labelNoContext
+	var configPathDesc string
+	if cfgEnvSet {
+		configPathDesc = fmt.Sprintf("Конфіг (KUBECONFIG):\n%s\n(Авто-оновлення ВИМК.)", cfgFile)
 	} else {
-		log.Printf("Set Current Context: %v\n", contextName)
+		configPathDesc = fmt.Sprintf("Конфіг (Дефолт):\n%s\n(Авто-оновлення УВІМК.)", cfgFile)
 	}
-	readConfig("setCurrentContext")
-	refreshList("setCurrentContext")
-}
+	if ctx != "" {
+		tooltip = fmt.Sprintf("Поточний: %s\n---\n%s", ctx, configPathDesc)
+	} else {
+		tooltip = fmt.Sprintf("Контекст не встановлено\n---\n%s", configPathDesc)
+	}
+	if len(tooltip) > maxTooltipLength {
+		tooltip = tooltip[:maxTooltipLength-3] + "..."
+	}
+	systray.SetTooltip(tooltip)
 
-func setTrayMenu(from string) {
-	var menuItem *fyne.MenuItem = nil
-	var menuItems []*fyne.MenuItem = nil
-	menuItem = fyne.NewMenuItem("Open main window", func() { myWindow.Show() })
-	menuItems = append(menuItems, menuItem)
-	menuItem = fyne.NewMenuItemSeparator()
-	menuItems = append(menuItems, menuItem)
-
-	for _, k := range contextData {
-		menuItem = fyne.NewMenuItem(k, func() { setCurrentContext(k) })
-		if k == cfg.CurrentContext {
-			//menuItem.Icon = icoClusterCurrent
-			menuItem.Icon = resdata.IcoClusterCurrent
+	if currentContextItem != nil {
+		if ctx != "" {
+			currentContextItem.SetTitle(fmt.Sprintf("✓ %s", displayName))
+			currentContextItem.Check()
+			currentContextItem.Show()
 		} else {
-			menuItem.Icon = resdata.IcoCluster
+			currentContextItem.SetTitle(labelNoContext)
+			currentContextItem.Uncheck()
+			currentContextItem.Show()
 		}
-		menuItems = append(menuItems, menuItem)
+	} else {
+		logError("currentContextItem is nil during update!")
 	}
-	menuItem = fyne.NewMenuItemSeparator()
-	menuItems = append(menuItems, menuItem)
-	menuItem = fyne.NewMenuItem("Quit", func() { myApp.Quit() })
-	menuItems = append(menuItems, menuItem)
-	//menu = fyne.NewMenu("Systray menu")
-	menu.Items = menuItems
-	log.Printf("setTrayMenu From: %v\n", from)
-}
 
-func makeListTab() fyne.CanvasObject {
-	icon := widget.NewIcon(nil)
-	label := widget.NewLabel("")
-	btnSetContext = widget.NewButton("Set Context", func() {})
-	btnSetContext.Hide()
-	hbox = container.NewHBox(label, btnSetContext)
-	list = widget.NewList(
-		func() int {
-			return len(contextData)
-		},
-		func() fyne.CanvasObject {
-			return container.NewHBox(
-				widget.NewIcon(resdata.IcoChecked),
-				widget.NewLabel(""))
-		},
-		func(id widget.ListItemID, item fyne.CanvasObject) {
-			if contextData[id] == currentContext {
-				item.(*fyne.Container).Objects[0].(*widget.Icon).Show()
-				item.(*fyne.Container).Objects[1].(*widget.Label).SetText(contextData[id])
-			} else {
-				item.(*fyne.Container).Objects[0].(*widget.Icon).Hide()
-				item.(*fyne.Container).Objects[1].(*widget.Label).SetText(contextData[id])
-			}
-		},
-	)
-	list.OnSelected = func(id widget.ListItemID) {
-		btnSetContext.Hide()
-		if contextData[id] != currentContext {
-			btnSetContext.SetText("Use Context " + contextData[id])
-			btnSetContext.OnTapped = func() {
-				setCurrentContext(contextData[id])
-			}
-			btnSetContext.Show()
-		}
-	}
-	list.OnUnselected = func(id widget.ListItemID) {
-		label.SetText("")
-		icon.SetResource(nil)
-	}
-	list.SetItemHeight(5, 50)
-	for i := 0; i < list.Length(); i++ {
-		list.RefreshItem(i)
-	}
-	list.Refresh()
-	hbox.Refresh()
-	return container.NewHSplit(list, container.NewCenter(hbox))
-}
-
-func myWatcher() {
-	watcher, err := fsnotify.NewWatcher()
+	allContexts, err := getContexts()
 	if err != nil {
-		log.Println("ERROR", err)
+		logError("Не вдалося отримати контексти для меню: %v", err)
+		menuMu.Lock()
+		for _, item := range contextMenuItems {
+			item.Hide()
+			delete(menuItemContexts, item)
+		}
+		menuMu.Unlock()
+	} else {
+		if len(allContexts) > maxContextItems {
+			logWarning("Кількість контекстів (%d) перевищує ліміт меню (%d). Деякі не будуть показані.", len(allContexts), maxContextItems)
+		}
+
+		menuMu.Lock()
+		processedItems := 0
+		clear(menuItemContexts)
+
+		for _, c := range allContexts {
+			if c == ctx {
+				continue
+			}
+			if processedItems >= maxContextItems {
+				break
+			}
+
+			item := contextMenuItems[processedItems]
+			item.SetTitle(fmt.Sprintf("  %s", getDisplayName(c)))
+			item.SetTooltip(fmt.Sprintf("Перемкнути на: %s", c))
+			menuItemContexts[item] = c
+			item.Show()
+			processedItems++
+		}
+
+		for i := processedItems; i < len(contextMenuItems); i++ {
+			item := contextMenuItems[i]
+			item.Hide()
+			delete(menuItemContexts, item)
+		}
+		menuMu.Unlock()
 	}
-	defer func() {
-		err := watcher.Close()
-		if err != nil {
-			log.Println("ERROR", err)
+	logDebug("UI Systray оновлено (Hide/Show)")
+}
+
+func refreshState() {
+	logDebug("Оновлення стану...")
+	setIcon(iconLoading)
+	systray.SetTitle(labelLoading)
+	systray.SetTooltip("Оновлення контексту...")
+
+	newContext, err := getCurrentContext()
+
+	stateMu.Lock()
+	refreshNeeded := false
+
+	if err != nil {
+		logError("Помилка оновлення поточного контексту: %v", err)
+		if currentContext != "" {
+			logInfo("Контекст скинуто через помилку оновлення.")
+			currentContext = ""
+			refreshNeeded = true
+		}
+		stateMu.Unlock()
+		setIcon(iconError)
+		systray.SetTitle(labelError)
+		systray.SetTooltip(fmt.Sprintf("Помилка оновлення: %v", err))
+		updateSystrayUI()
+		return
+	}
+
+	if newContext != currentContext {
+		logInfo("Контекст змінився з '%s' на '%s'", currentContext, newContext)
+		currentContext = newContext
+		refreshNeeded = true
+	} else {
+		logDebug("Контекст не змінився ('%s')", currentContext)
+		refreshNeeded = true
+	}
+	stateMu.Unlock()
+
+	if refreshNeeded {
+		updateSystrayUI()
+	}
+}
+
+func handleContextSwitchClick(contextName string) {
+	logDebug("Обробка кліку для перемикання на '%s'", contextName)
+	setIcon(iconLoading)
+	systray.SetTooltip("Перемикання контексту...")
+
+	err := switchContext(contextName)
+	if err != nil {
+		logError("Помилка перемикання контексту через меню на '%s': %v", contextName, err)
+		systray.SetTooltip(fmt.Sprintf("Помилка перемикання: %v", err))
+		time.Sleep(3 * time.Second)
+	}
+	refreshState()
+}
+
+func setupFileWatcher() {
+	stateMu.RLock()
+	cfgFile := kubeconfigFile
+	cfgEnvSet := isKubeconfigEnvSet
+	stateMu.RUnlock()
+	if cfgEnvSet {
+		logInfo("Встановлено змінну KUBECONFIG. Моніторинг файлу вимкнено.")
+		return
+	}
+	if cfgFile == "" {
+		logError("Неможливо налаштувати моніторинг: шлях до kubeconfig порожній.")
+		return
+	}
+	var err error
+	watcher, err = fsnotify.NewWatcher()
+	if err != nil {
+		logError("Не вдалося створити file watcher: %v", err)
+		return
+	}
+	watchDir := filepath.Dir(cfgFile)
+	if _, err := os.Stat(watchDir); os.IsNotExist(err) {
+		logError("Директорія для моніторингу '%s' не існує.", watchDir)
+		watcher.Close()
+		watcher = nil
+		return
+	}
+	err = watcher.Add(watchDir)
+	if err != nil {
+		logError("Не вдалося додати шлях '%s' до file watcher: %v", watchDir, err)
+		watcher.Close()
+		watcher = nil
+		return
+	}
+	logInfo("Запущено моніторинг директорії: %s (відстеження змін у %s)", watchDir, filepath.Base(cfgFile))
+	watcherDone = make(chan bool)
+	go func() {
+		debounceTimer := time.NewTimer(time.Hour)
+		debounceTimer.Stop()
+		const debounceDuration = 750 * time.Millisecond
+		for {
+			select {
+			case event, ok := <-watcher.Events:
+				if !ok {
+					logInfo("Канал подій watcher закрито.")
+					return
+				}
+				logDebug("Подія watcher: Name: %s, Op: %s", event.Name, event.Op)
+				stateMu.RLock()
+				currentCfgFile := kubeconfigFile
+				stateMu.RUnlock()
+				if filepath.Clean(event.Name) == filepath.Clean(currentCfgFile) {
+					if event.Has(fsnotify.Write) || event.Has(fsnotify.Create) || event.Has(fsnotify.Rename) || event.Has(fsnotify.Remove) {
+						logDebug("Виявлено релевантну зміну для %s. Перезапуск таймера debounce.", currentCfgFile)
+						debounceTimer.Reset(debounceDuration)
+					}
+				} else if event.Has(fsnotify.Rename) || event.Has(fsnotify.Remove) {
+					if filepath.Dir(event.Name) == watchDir {
+						logDebug("Виявлено потенційно релевантну зміну (rename/remove) у директорії %s. Перезапуск таймера debounce.", watchDir)
+						debounceTimer.Reset(debounceDuration)
+					}
+				}
+			case err, ok := <-watcher.Errors:
+				if !ok {
+					logInfo("Канал помилок watcher закрито.")
+					return
+				}
+				logError("Помилка watcher: %v", err)
+			case <-debounceTimer.C:
+				logInfo("Спрацював таймер debounce. Оновлення стану через зміну файлу.")
+				refreshState()
+			case <-watcherDone:
+				logInfo("Зупинка горутини file watcher.")
+				watcher.Close()
+				debounceTimer.Stop()
+				return
+			}
 		}
 	}()
+}
 
-	done := make(chan bool)
+func stopFileWatcher() {
+	if watcher != nil && watcherDone != nil {
+		logInfo("Зупинка file watcher...")
+		select {
+		case <-watcherDone:
+		default:
+			close(watcherDone)
+		}
+		watcher = nil
+		watcherDone = nil
+		logInfo("File watcher зупинено.")
+	}
+}
+
+func getKubeconfigFile() string {
+	if kf := os.Getenv("KUBECONFIG"); kf != "" {
+		logDebug("Використання змінної середовища KUBECONFIG: %s", kf)
+		stateMu.Lock()
+		isKubeconfigEnvSet = true
+		stateMu.Unlock()
+		listSeparator := string(filepath.ListSeparator)
+		files := strings.Split(kf, listSeparator)
+		if len(files) > 0 && strings.TrimSpace(files[0]) != "" {
+			return files[0]
+		}
+		logError("KUBECONFIG встановлено, але список файлів порожній або містить помилки.")
+		return ""
+	}
+	logDebug("KUBECONFIG не встановлено, використання стандартного шляху.")
+	stateMu.Lock()
+	isKubeconfigEnvSet = false
+	stateMu.Unlock()
+	home, err := os.UserHomeDir()
+	if err != nil {
+		logError("Не вдалося отримати домашню директорію користувача: %v", err)
+		return ""
+	}
+	return filepath.Join(home, ".kube", "config")
+}
+
+func checkKubectlExists() bool {
+	logDebug("Перевірка наявності команди kubectl...")
+	_, err := exec.LookPath(kubectlCmd)
+	if err != nil {
+		logError("Команду kubectl не знайдено в PATH: %v", err)
+		return false
+	}
+	logDebug("kubectl знайдено в PATH.")
+	return true
+}
+
+func loadIcon(path string) []byte {
+	logDebug("Завантаження іконки: %s", path)
+	data, err := ioutil.ReadFile(path)
+	if err != nil {
+		logError("Не вдалося завантажити іконку '%s': %v", path, err)
+		return nil
+	}
+	logDebug("Іконку '%s' завантажено (%d байт).", path, len(data))
+	return data
+}
+
+func setIcon(path string) {
+	iconBytes := loadIcon(path)
+	if iconBytes != nil {
+		systray.SetIcon(iconBytes)
+	} else {
+		logError("Не вдалося встановити іконку: дані порожні (%s)", path)
+	}
+}
+
+func openKubeFolder() {
+	stateMu.RLock()
+	cfgFile := kubeconfigFile
+	stateMu.RUnlock()
+	dir := filepath.Dir(cfgFile)
+	if dir == "." || dir == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			logError("Не вдалося отримати home dir для відкриття папки .kube")
+			return
+		}
+		dir = filepath.Join(home, ".kube")
+	}
+	logDebug("Спроба відкрити папку: %s", dir)
+	var cmd *exec.Cmd
+	switch goos := runtime.GOOS; goos {
+	case "linux":
+		cmd = exec.Command("xdg-open", dir)
+	case "windows":
+		cmd = exec.Command("explorer", dir)
+	case "darwin":
+		cmd = exec.Command("open", dir)
+	default:
+		logError("Непідтримувана ОС для відкриття папки: %s", goos)
+		return
+	}
+	err := cmd.Start()
+	if err != nil {
+		logError("Не вдалося відкрити папку '%s': %v", dir, err)
+	}
+}
+
+func onReady() {
+	logInfo("Systray готовий. Версія Go: %s", runtime.Version())
+	systray.SetTitle(labelLoading)
+	systray.SetTooltip(labelLoading)
+	setIcon(iconLoading)
+
+	menuItemContexts = make(map[*systray.MenuItem]string)
+
+	stateMu.Lock()
+	kubeconfigFile = getKubeconfigFile()
+	stateMu.Unlock()
+
+	if !checkKubectlExists() {
+		systray.SetTitle("Помилка")
+		systray.SetTooltip("kubectl не знайдено в PATH")
+		setIcon(iconError)
+		systray.AddMenuItem("Помилка: kubectl не знайдено", "kubectl command is required")
+		systray.AddSeparator()
+		mQuit := systray.AddMenuItem("Вийти", "Exit")
+		go func() { <-mQuit.ClickedCh; systray.Quit() }()
+		return
+	}
+
+	currentContextItem = systray.AddMenuItem(labelLoading, "Поточний контекст Kubernetes")
+	systray.AddSeparator()
+	contextMenuItems = make([]*systray.MenuItem, 0, maxContextItems)
+	for i := 0; i < maxContextItems; i++ {
+		item := systray.AddMenuItem(fmt.Sprintf("placeholder_%d", i), "")
+		item.Hide()
+		contextMenuItems = append(contextMenuItems, item)
+
+		go func(menuItem *systray.MenuItem) {
+			for range menuItem.ClickedCh {
+				menuMu.Lock()
+				contextName, ok := menuItemContexts[menuItem]
+				menuMu.Unlock()
+
+				if ok && contextName != "" {
+					handleContextSwitchClick(contextName)
+				} else {
+					logDebug("Клікнуто на пункт меню без призначеного контексту?")
+				}
+			}
+			logDebug("Горутина обробника кліків для пункту меню завершується.")
+		}(item)
+	}
+	systray.AddSeparator()
+	mRefresh := systray.AddMenuItem("Оновити", "Перезавантажити список та поточний контекст")
+	mOpenFolder := systray.AddMenuItem("Відкрити ~/.kube", "Відкрити стандартну папку конфігурації Kubernetes")
+	mQuit := systray.AddMenuItem("Вийти", "Завершити програму")
 	go func() {
 		for {
 			select {
-			case event := <-watcher.Events:
-				log.Printf("Watch event: %s\n", event.Op.String())
-				if event.Op.Has(fsnotify.Write) {
-					readConfig("Goroutine")
-					refreshList("Goroutine")
-					sendNotification("Context changed", "Current context set to "+cfg.CurrentContext)
-				}
-
-			case err := <-watcher.Errors:
-				log.Println("Watch ERROR", err)
+			case <-mRefresh.ClickedCh:
+				logDebug("Клік 'Оновити'")
+				refreshState()
+			case <-mOpenFolder.ClickedCh:
+				logDebug("Клік 'Відкрити папку'")
+				openKubeFolder()
+			case <-mQuit.ClickedCh:
+				logInfo("Клік 'Вийти'")
+				systray.Quit()
+				return
 			}
 		}
 	}()
-	if err := watcher.Add(originFilename); err != nil {
-		log.Println("Watch ERROR", err)
-	}
-	<-done
+
+	refreshState()
+	setupFileWatcher()
 }
 
-func makeMainMenu() {
-	menu := fyne.NewMenu("File")
-	mMenu := fyne.NewMainMenu(menu)
-	myWindow.SetMainMenu(mMenu)
-}
-
-func makeMainWindow() {
-	myWindow.Resize(fyne.NewSize(800, 350))
-	myWindow.SetFixedSize(true)
-	//myWindow.CenterOnScreen()
-	myWindow.SetIcon(resdata.IcoGreen)
-	myWindow.SetContent(makeListTab())
-	myWindow.SetCloseIntercept(func() {
-		myWindow.Hide()
-	})
-	myWindow.Show()
-
-}
-
-func printConfigData() {
-	fmt.Printf("Current context: %v\n", cfg.CurrentContext)
-	fmt.Printf("Origin Filename: %v\n", originFilename)
-	for k := range cfg.Contexts {
-		fmt.Printf("Context: %v\n", k)
-		fmt.Printf("AuthInfo: %v\n", cfg.Contexts[k].AuthInfo)
-		fmt.Printf("Kubeconf: %v\n", cfg.Contexts[k].LocationOfOrigin)
-		fmt.Printf("Cluster: %v\n", cfg.Contexts[k].Cluster)
-		fmt.Printf("Namespace: %v\n", cfg.Contexts[k].Namespace)
-		for ek, ev := range cfg.Contexts[k].Extensions {
-			fmt.Printf("Extension %v: %v\n", ek, ev)
-		}
-		fmt.Println("-----------------------------------------------------------------")
-	}
-
-	for kc := range cfg.Clusters {
-		fmt.Printf("Cluster: %v\n", kc)
-		fmt.Printf("Server: %v\n", cfg.Clusters[kc].Server)
-		fmt.Printf("CertificateAuthority: %v\n", cfg.Clusters[kc].CertificateAuthority)
-		fmt.Printf("TLSServerName: %v\n", cfg.Clusters[kc].TLSServerName)
-		fmt.Printf("LocationOfOrigin: %v\n", cfg.Clusters[kc].LocationOfOrigin)
-		for ek, ev := range cfg.Clusters[kc].Extensions {
-			fmt.Printf("Extension %v: %v\n", ek, ev)
-		}
-		fmt.Println("==================================================================")
-	}
-
+func onExit() {
+	logInfo("Вихід з systray...")
+	stopFileWatcher()
+	logInfo("Очищення завершено.")
 }
 
 func main() {
-	readConfig("Main")
-	makeMainWindow()
-	refreshList("Main")
-	makeMainMenu()
-	go myWatcher()
-	myApp.SetIcon(resdata.IcoGreen)
-	myApp.Run()
+	log.SetFlags(log.Ldate | log.Ltime)
+	logInfo("Запуск KubeContextSwitcher(Go)...")
+	logInfo("Версія Go: %s", runtime.Version())
+	systray.Run(onReady, onExit)
+	logInfo("KubeContextSwitcher(Go) завершено.")
 }
