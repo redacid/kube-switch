@@ -30,9 +30,9 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
-	networkingv1 "k8s.io/api/networking/v1" // Додано для Ingress
+	networkingv1 "k8s.io/api/networking/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
-	storagev1 "k8s.io/api/storage/v1" // Додано для Storage
+	storagev1 "k8s.io/api/storage/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
@@ -90,8 +90,8 @@ var (
 	currentCronJobs     []batchv1.CronJob
 	currentConfigMaps   []corev1.ConfigMap
 	currentSecrets      []corev1.Secret
-	currentServices     []corev1.Service       // Додано
-	currentIngresses    []networkingv1.Ingress // Додано
+	currentServices     []corev1.Service
+	currentIngresses    []networkingv1.Ingress
 	// Access Control
 	currentServiceAccounts     []corev1.ServiceAccount
 	currentRoles               []rbacv1.Role
@@ -360,24 +360,24 @@ func updateUIWidgets() {
 		case "Secrets":
 			resourceCount = secretCount
 		case "Services":
-			resourceCount = svcCount // Додано
+			resourceCount = svcCount
 		case "Ingresses":
-			resourceCount = ingCount // Додано
-		case "ServiceAccounts": // Додано
+			resourceCount = ingCount
+		case "ServiceAccounts":
 			resourceCount = saCount
-		case "Roles": // Додано
+		case "Roles":
 			resourceCount = roleCount
-		case "RoleBindings": // Додано
+		case "RoleBindings":
 			resourceCount = roleBindingCount
-		case "ClusterRoles": // Додано
+		case "ClusterRoles":
 			resourceCount = clusterRoleCount
-		case "ClusterRoleBindings": // Додано
+		case "ClusterRoleBindings":
 			resourceCount = clusterRoleBindingCount
-		case "PersistentVolumes": // Додано
+		case "PersistentVolumes":
 			resourceCount = pvCount
-		case "PersistentVolumeClaims": // Додано
+		case "PersistentVolumeClaims":
 			resourceCount = pvcCount
-		case "StorageClasses": // Додано
+		case "StorageClasses":
 			resourceCount = scCount
 		// Додайте інші типи тут...
 		default:
@@ -508,15 +508,15 @@ func loadSelectedResources() {
 	newSecrets := []corev1.Secret{}
 	newServices := []corev1.Service{}
 	newIngresses := []networkingv1.Ingress{}
-	newServiceAccounts := []corev1.ServiceAccount{}         // Додано
-	newRoles := []rbacv1.Role{}                             // Додано
-	newRoleBindings := []rbacv1.RoleBinding{}               // Додано
-	newClusterRoles := []rbacv1.ClusterRole{}               // Додано
-	newClusterRoleBindings := []rbacv1.ClusterRoleBinding{} // Додано
+	newServiceAccounts := []corev1.ServiceAccount{}
+	newRoles := []rbacv1.Role{}
+	newRoleBindings := []rbacv1.RoleBinding{}
+	newClusterRoles := []rbacv1.ClusterRole{}
+	newClusterRoleBindings := []rbacv1.ClusterRoleBinding{}
 	// Storage
-	newPersistentVolumes := []corev1.PersistentVolume{}           // Додано
-	newPersistentVolumeClaims := []corev1.PersistentVolumeClaim{} // Додано
-	newStorageClasses := []storagev1.StorageClass{}               // Додано
+	newPersistentVolumes := []corev1.PersistentVolume{}
+	newPersistentVolumeClaims := []corev1.PersistentVolumeClaim{}
+	newStorageClasses := []storagev1.StorageClass{}
 	listOptions := metav1.ListOptions{}
 	ctxTimeout, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -646,7 +646,7 @@ func loadSelectedResources() {
 			newSecrets = list.Items
 			sort.Slice(newSecrets, func(i, j int) bool { return newSecrets[i].Name < newSecrets[j].Name })
 		}
-	// Додано Services та Ingresses
+	// Services та Ingresses
 	case "Services":
 		logWarning("ЗАВАНТАЖЕННЯ ВСІХ SERVICES!")
 		list, listErr := clientset.CoreV1().Services("").List(ctxTimeout, listOptions)
@@ -667,7 +667,7 @@ func loadSelectedResources() {
 			newIngresses = list.Items
 			sort.Slice(newIngresses, func(i, j int) bool { return newIngresses[i].Name < newIngresses[j].Name })
 		}
-	case "ServiceAccounts": // Додано
+	case "ServiceAccounts":
 		logWarning("ЗАВАНТАЖЕННЯ ВСІХ SERVICEACCOUNTS!")
 		list, listErr := clientset.CoreV1().ServiceAccounts("").List(ctxTimeout, listOptions)
 		if listErr != nil {
@@ -677,7 +677,7 @@ func loadSelectedResources() {
 			newServiceAccounts = list.Items
 			sort.Slice(newServiceAccounts, func(i, j int) bool { return newServiceAccounts[i].Name < newServiceAccounts[j].Name })
 		}
-	case "Roles": // Додано
+	case "Roles":
 		logWarning("ЗАВАНТАЖЕННЯ ВСІХ ROLES!")
 		list, listErr := clientset.RbacV1().Roles("").List(ctxTimeout, listOptions)
 		if listErr != nil {
@@ -687,7 +687,7 @@ func loadSelectedResources() {
 			newRoles = list.Items
 			sort.Slice(newRoles, func(i, j int) bool { return newRoles[i].Name < newRoles[j].Name })
 		}
-	case "RoleBindings": // Додано
+	case "RoleBindings":
 		logWarning("ЗАВАНТАЖЕННЯ ВСІХ ROLEBINDINGS!")
 		list, listErr := clientset.RbacV1().RoleBindings("").List(ctxTimeout, listOptions)
 		if listErr != nil {
@@ -697,7 +697,7 @@ func loadSelectedResources() {
 			newRoleBindings = list.Items
 			sort.Slice(newRoleBindings, func(i, j int) bool { return newRoleBindings[i].Name < newRoleBindings[j].Name })
 		}
-	case "ClusterRoles": // Додано
+	case "ClusterRoles":
 		logWarning("ЗАВАНТАЖЕННЯ ВСІХ CLUSTERROLES!")
 		list, listErr := clientset.RbacV1().ClusterRoles().List(ctxTimeout, listOptions)
 		if listErr != nil {
@@ -707,7 +707,7 @@ func loadSelectedResources() {
 			newClusterRoles = list.Items
 			sort.Slice(newClusterRoles, func(i, j int) bool { return newClusterRoles[i].Name < newClusterRoles[j].Name })
 		}
-	case "ClusterRoleBindings": // Додано
+	case "ClusterRoleBindings":
 		logWarning("ЗАВАНТАЖЕННЯ ВСІХ CLUSTERROLEBINDINGS!")
 		list, listErr := clientset.RbacV1().ClusterRoleBindings().List(ctxTimeout, listOptions)
 		if listErr != nil {
@@ -717,7 +717,7 @@ func loadSelectedResources() {
 			newClusterRoleBindings = list.Items
 			sort.Slice(newClusterRoleBindings, func(i, j int) bool { return newClusterRoleBindings[i].Name < newClusterRoleBindings[j].Name })
 		}
-	case "PersistentVolumes": // Додано
+	case "PersistentVolumes":
 		logWarning("ЗАВАНТАЖЕННЯ ВСІХ PERSISTENTVOLUMES!")
 		list, listErr := clientset.CoreV1().PersistentVolumes().List(ctxTimeout, listOptions)
 		if listErr != nil {
@@ -727,7 +727,7 @@ func loadSelectedResources() {
 			newPersistentVolumes = list.Items
 			sort.Slice(newPersistentVolumes, func(i, j int) bool { return newPersistentVolumes[i].Name < newPersistentVolumes[j].Name })
 		}
-	case "PersistentVolumeClaims": // Додано
+	case "PersistentVolumeClaims":
 		logWarning("ЗАВАНТАЖЕННЯ ВСІХ PERSISTENTVOLUMECLAIMS!")
 		list, listErr := clientset.CoreV1().PersistentVolumeClaims("").List(ctxTimeout, listOptions)
 		if listErr != nil {
@@ -737,7 +737,7 @@ func loadSelectedResources() {
 			newPersistentVolumeClaims = list.Items
 			sort.Slice(newPersistentVolumeClaims, func(i, j int) bool { return newPersistentVolumeClaims[i].Name < newPersistentVolumeClaims[j].Name })
 		}
-	case "StorageClasses": // Додано
+	case "StorageClasses":
 		logWarning("ЗАВАНТАЖЕННЯ ВСІХ STORAGECLASSES!")
 		list, listErr := clientset.StorageV1().StorageClasses().List(ctxTimeout, listOptions)
 		if listErr != nil {
@@ -783,24 +783,24 @@ func loadSelectedResources() {
 	case "Secrets":
 		currentSecrets = newSecrets
 	case "Services":
-		currentServices = newServices // Додано
+		currentServices = newServices
 	case "Ingresses":
-		currentIngresses = newIngresses // Додано
-	case "ServiceAccounts": // Додано
+		currentIngresses = newIngresses
+	case "ServiceAccounts":
 		currentServiceAccounts = newServiceAccounts
-	case "Roles": // Додано
+	case "Roles":
 		currentRoles = newRoles
-	case "RoleBindings": // Додано
+	case "RoleBindings":
 		currentRoleBindings = newRoleBindings
-	case "ClusterRoles": // Додано
+	case "ClusterRoles":
 		currentClusterRoles = newClusterRoles
-	case "ClusterRoleBindings": // Додано
+	case "ClusterRoleBindings":
 		currentClusterRoleBindings = newClusterRoleBindings
-	case "PersistentVolumes": // Додано
+	case "PersistentVolumes":
 		currentPersistentVolumes = newPersistentVolumes
-	case "PersistentVolumeClaims": // Додано
+	case "PersistentVolumeClaims":
 		currentPersistentVolumeClaims = newPersistentVolumeClaims
-	case "StorageClasses": // Додано
+	case "StorageClasses":
 		currentStorageClasses = newStorageClasses
 	}
 	stateMu.Unlock()
@@ -833,9 +833,9 @@ func loadSelectedResources() {
 			case "Secrets":
 				count = len(newSecrets)
 			case "Services":
-				count = len(newServices) // Додано
+				count = len(newServices)
 			case "Ingresses":
-				count = len(newIngresses) // Додано
+				count = len(newIngresses)
 			}
 			statusMsg = fmt.Sprintf("Підключено: %s | %s: %d", getDisplayName(contextName), resType, count)
 		}
@@ -1660,21 +1660,21 @@ func main() {
 				return len(currentServices)
 			case "Ingresses":
 				return len(currentIngresses)
-			case "ServiceAccounts": // Додано
+			case "ServiceAccounts":
 				return len(currentServiceAccounts)
-			case "Roles": // Додано
+			case "Roles":
 				return len(currentRoles)
-			case "RoleBindings": // Додано
+			case "RoleBindings":
 				return len(currentRoleBindings)
-			case "ClusterRoles": // Додано
+			case "ClusterRoles":
 				return len(currentClusterRoles)
-			case "ClusterRoleBindings": // Додано
+			case "ClusterRoleBindings":
 				return len(currentClusterRoleBindings)
-			case "PersistentVolumes": // Додано
+			case "PersistentVolumes":
 				return len(currentPersistentVolumes)
-			case "PersistentVolumeClaims": // Додано
+			case "PersistentVolumeClaims":
 				return len(currentPersistentVolumeClaims)
-			case "StorageClasses": // Додано
+			case "StorageClasses":
 				return len(currentStorageClasses)
 			default:
 				return 0
@@ -1738,41 +1738,41 @@ func main() {
 				if id >= 0 && id < len(currentIngresses) {
 					name = fmt.Sprintf("%s/%s", currentIngresses[id].Namespace, currentIngresses[id].Name)
 				}
-			case "ServiceAccounts": // Додано
+			case "ServiceAccounts":
 				if id >= 0 && id < len(currentServiceAccounts) {
 					name = fmt.Sprintf("%s/%s", currentServiceAccounts[id].Namespace, currentServiceAccounts[id].Name)
 					if currentServiceAccounts[id].Namespace == "" {
 						name = currentServiceAccounts[id].Name
 					}
 				}
-			case "Roles": // Додано
+			case "Roles":
 				if id >= 0 && id < len(currentRoles) {
 					name = fmt.Sprintf("%s/%s", currentRoles[id].Namespace, currentRoles[id].Name)
 					if currentRoles[id].Namespace == "" {
 						name = currentRoles[id].Name
 					}
 				}
-			case "RoleBindings": // Додано
+			case "RoleBindings":
 				if id >= 0 && id < len(currentRoleBindings) {
 					name = fmt.Sprintf("%s/%s", currentRoleBindings[id].Namespace, currentRoleBindings[id].Name)
 				}
-			case "ClusterRoles": // Додано
+			case "ClusterRoles":
 				if id >= 0 && id < len(currentClusterRoles) {
 					name = currentClusterRoles[id].Name
 				}
-			case "ClusterRoleBindings": // Додано
+			case "ClusterRoleBindings":
 				if id >= 0 && id < len(currentClusterRoleBindings) {
 					name = currentClusterRoleBindings[id].Name
 				}
-			case "PersistentVolumes": // Додано
+			case "PersistentVolumes":
 				if id >= 0 && id < len(currentPersistentVolumes) {
 					name = currentPersistentVolumes[id].Name
 				}
-			case "PersistentVolumeClaims": // Додано
+			case "PersistentVolumeClaims":
 				if id >= 0 && id < len(currentPersistentVolumeClaims) {
 					name = fmt.Sprintf("%s/%s", currentPersistentVolumeClaims[id].Namespace, currentPersistentVolumeClaims[id].Name)
 				}
-			case "StorageClasses": // Додано
+			case "StorageClasses":
 				if id >= 0 && id < len(currentStorageClasses) {
 					name = currentStorageClasses[id].Name
 				}
@@ -1848,48 +1848,48 @@ func main() {
 			if id >= 0 && id < len(currentServices) {
 				obj = currentServices[id]
 				resourceName = currentServices[id].Name
-			} // Додано
+			}
 		case "Ingresses":
 			if id >= 0 && id < len(currentIngresses) {
 				obj = currentIngresses[id]
 				resourceName = currentIngresses[id].Name
-			} // Додано
-		case "ServiceAccounts": // Додано
+			}
+		case "ServiceAccounts":
 			if id >= 0 && id < len(currentServiceAccounts) {
 				obj = currentServiceAccounts[id]
 				resourceName = currentServiceAccounts[id].Name
 			}
-		case "Roles": // Додано
+		case "Roles":
 			if id >= 0 && id < len(currentRoles) {
 				obj = currentRoles[id]
 				resourceName = currentRoles[id].Name
 			}
-		case "RoleBindings": // Додано
+		case "RoleBindings":
 			if id >= 0 && id < len(currentRoleBindings) {
 				obj = currentRoleBindings[id]
 				resourceName = currentRoleBindings[id].Name
 			}
-		case "ClusterRoles": // Додано
+		case "ClusterRoles":
 			if id >= 0 && id < len(currentClusterRoles) {
 				obj = currentClusterRoles[id]
 				resourceName = currentClusterRoles[id].Name
 			}
-		case "ClusterRoleBindings": // Додано
+		case "ClusterRoleBindings":
 			if id >= 0 && id < len(currentClusterRoleBindings) {
 				obj = currentClusterRoleBindings[id]
 				resourceName = currentClusterRoleBindings[id].Name
 			}
-		case "PersistentVolumes": // Додано
+		case "PersistentVolumes":
 			if id >= 0 && id < len(currentPersistentVolumes) {
 				obj = currentPersistentVolumes[id]
 				resourceName = currentPersistentVolumes[id].Name
 			}
-		case "PersistentVolumeClaims": // Додано
+		case "PersistentVolumeClaims":
 			if id >= 0 && id < len(currentPersistentVolumeClaims) {
 				obj = currentPersistentVolumeClaims[id]
 				resourceName = currentPersistentVolumeClaims[id].Name
 			}
-		case "StorageClasses": // Додано
+		case "StorageClasses":
 			if id >= 0 && id < len(currentStorageClasses) {
 				obj = currentStorageClasses[id]
 				resourceName = currentStorageClasses[id].Name
@@ -1980,32 +1980,32 @@ func displayResourceDetails(resType string, resource interface{}) {
 		resourceName = data.Name
 	case corev1.Service:
 		detailWidget = buildServiceDetailsView(data)
-		resourceName = data.Name // Додано
+		resourceName = data.Name
 	case networkingv1.Ingress:
 		detailWidget = buildIngressDetailsView(data)
-		resourceName = data.Name // Додано
-	case corev1.ServiceAccount: // Додано
+		resourceName = data.Name
+	case corev1.ServiceAccount:
 		detailWidget = buildServiceAccountDetailsView(data)
 		resourceName = data.Name
-	case rbacv1.Role: // Додано
+	case rbacv1.Role:
 		detailWidget = buildRoleDetailsView(data)
 		resourceName = data.Name
-	case rbacv1.RoleBinding: // Додано
+	case rbacv1.RoleBinding:
 		detailWidget = buildRoleBindingDetailsView(data)
 		resourceName = data.Name
-	case rbacv1.ClusterRole: // Додано
+	case rbacv1.ClusterRole:
 		detailWidget = buildClusterRoleDetailsView(data)
 		resourceName = data.Name
-	case rbacv1.ClusterRoleBinding: // Додано
+	case rbacv1.ClusterRoleBinding:
 		detailWidget = buildClusterRoleBindingDetailsView(data)
 		resourceName = data.Name
-	case corev1.PersistentVolume: // Додано
+	case corev1.PersistentVolume:
 		detailWidget = buildPersistentVolumeDetailsView(data)
 		resourceName = data.Name
-	case corev1.PersistentVolumeClaim: // Додано
+	case corev1.PersistentVolumeClaim:
 		detailWidget = buildPersistentVolumeClaimDetailsView(data)
 		resourceName = data.Name
-	case storagev1.StorageClass: // Додано
+	case storagev1.StorageClass:
 		detailWidget = buildStorageClassDetailsView(data)
 		resourceName = data.Name
 	default:
