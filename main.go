@@ -3,7 +3,7 @@ package main
 import (
 	"context"
 	"embed"
-	//"errors"
+	// "errors"
 	"fmt"
 	"log"
 	"os"
@@ -30,6 +30,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1" // Додано для Ingress
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
@@ -42,14 +43,14 @@ var iconData []byte
 var _ embed.FS
 
 const enableDebugLogging = true
-const logPrefix = "GoKubeLens(Step6-FixUndef)" // Оновлено префікс
+const logPrefix = "GoKubeLens(Step8-Network)" // Оновлено префікс
 const maxContextItems = 50
 
 const labelLoading = "Завантаження..."
 const labelError = "Помилка"
 const labelNoContext = "Немає контексту"
 const labelBackToList = "<- Назад до списку"
-const appTitle = "Go Kube Manager (Lens Clone) - Step 6"
+const appTitle = "Go Kube Manager (Lens Clone) - Step 8"
 
 // Мапи для дерева ресурсів
 type resourceTreeNodeID = string
@@ -75,15 +76,20 @@ var (
 	connectedContextName string
 	allContextNames      []string
 	selectedResourceType string
-	currentNodes         []corev1.Node
-	currentNamespaces    []corev1.Namespace
-	currentPods          []corev1.Pod
-	currentDeployments   []appsv1.Deployment
-	currentStatefulSets  []appsv1.StatefulSet
-	currentDaemonSets    []appsv1.DaemonSet
-	currentReplicaSets   []appsv1.ReplicaSet
-	currentJobs          []batchv1.Job
-	currentCronJobs      []batchv1.CronJob
+	// Списки ресурсів
+	currentNodes        []corev1.Node
+	currentNamespaces   []corev1.Namespace
+	currentPods         []corev1.Pod
+	currentDeployments  []appsv1.Deployment
+	currentStatefulSets []appsv1.StatefulSet
+	currentDaemonSets   []appsv1.DaemonSet
+	currentReplicaSets  []appsv1.ReplicaSet
+	currentJobs         []batchv1.Job
+	currentCronJobs     []batchv1.CronJob
+	currentConfigMaps   []corev1.ConfigMap
+	currentSecrets      []corev1.Secret
+	currentServices     []corev1.Service       // Додано
+	currentIngresses    []networkingv1.Ingress // Додано
 
 	kubeconfigFile     string
 	isKubeconfigEnvSet bool
@@ -102,6 +108,7 @@ func logWarning(format string, v ...interface{}) { log.Printf(logPrefix+" [WARN]
 func logError(format string, v ...interface{})   { log.Printf(logPrefix+" [ERROR]: "+format, v...) }
 
 // --- Робота з Kubeconfig (clientcmd) ---
+// (Без змін)
 func loadKubeConfig() (*api.Config, string, error) {
 	stateMu.RLock()
 	rules := loadingRules
@@ -182,6 +189,7 @@ func switchContext(contextName string) error {
 }
 
 // --- Підключення до кластера ---
+// (Без змін)
 func connectToCluster(contextName string) (*kubernetes.Clientset, string, error) {
 	logInfo("Спроба підключення до: %s", contextName)
 	if statusBar != nil {
@@ -250,6 +258,7 @@ func updateUIWidgets() {
 	if statusBar != nil {
 		statusMsg = statusBar.Text
 	}
+	// Отримуємо кількість для всіх типів
 	nodesCount := len(currentNodes)
 	nsCount := len(currentNamespaces)
 	podsCount := len(currentPods)
@@ -259,7 +268,12 @@ func updateUIWidgets() {
 	rsCount := len(currentReplicaSets)
 	jobCount := len(currentJobs)
 	cronJobCount := len(currentCronJobs)
+	cmCount := len(currentConfigMaps)
+	secretCount := len(currentSecrets)
+	svcCount := len(currentServices)
+	ingCount := len(currentIngresses)
 	stateMu.RUnlock()
+
 	displayCtxFromFile := labelNoContext
 	if ctxFromFile != "" {
 		displayCtxFromFile = getDisplayName(ctxFromFile)
@@ -267,7 +281,8 @@ func updateUIWidgets() {
 	if currentContextLabel != nil {
 		currentContextLabel.SetText("Поточний у файлі: " + displayCtxFromFile)
 	}
-	if contextListWidget != nil {
+
+	if contextListWidget != nil { /* ... оновлення списку контекстів ... */
 		contextListWidget.Refresh()
 		targetSelection := connCtx
 		if targetSelection == "" {
@@ -286,7 +301,7 @@ func updateUIWidgets() {
 			contextListWidget.UnselectAll()
 		}
 	}
-	if resourceTypeTree != nil {
+	if resourceTypeTree != nil { /* ... оновлення дерева ... */
 		resourceTypeTree.Refresh()
 		if resType != "" {
 			resourceTypeTree.Select(resType)
@@ -294,9 +309,10 @@ func updateUIWidgets() {
 			resourceTypeTree.UnselectAll()
 		}
 	}
+
 	resourceCount := 0
 	if resourceListWidget != nil {
-		stateMu.RLock()
+		stateMu.RLock() // Потрібне блокування для читання кількості
 		switch resType {
 		case "Namespaces":
 			resourceCount = nsCount
@@ -316,6 +332,15 @@ func updateUIWidgets() {
 			resourceCount = jobCount
 		case "CronJobs":
 			resourceCount = cronJobCount
+		case "ConfigMaps":
+			resourceCount = cmCount
+		case "Secrets":
+			resourceCount = secretCount
+		case "Services":
+			resourceCount = svcCount // Додано
+		case "Ingresses":
+			resourceCount = ingCount // Додано
+		// Додайте інші типи тут...
 		default:
 			resourceCount = 0
 		}
@@ -323,8 +348,11 @@ func updateUIWidgets() {
 		logDebug("Оновлення списку ресурсів '%s' у UI (%d елементів)", resType, resourceCount)
 		resourceListWidget.Refresh()
 	}
+
 	//updateSystemTrayMenu()
+
 	if statusBar != nil && !strings.HasPrefix(statusMsg, "Помилка") && !strings.HasPrefix(statusMsg, "Підключення") && !strings.HasPrefix(statusMsg, "Завантаження") {
+		// Оновлено рядок стану
 		statusBar.SetText(fmt.Sprintf("Контекстів: %d | %s: %d", len(ctxList), resType, resourceCount))
 	}
 	logDebug("Оновлення UI віджетів завершено.")
@@ -346,11 +374,13 @@ func loadAndUpdateState() {
 		logError("Не вдалося отримати список контекстів: %v", errCtxList)
 		ctxList = []string{}
 	}
+
 	stateMu.Lock()
 	currentContextName = ctxFromFile
 	allContextNames = ctxList
 	connectedContextName = ""
 	currentClientset = nil
+	// Скидаємо ВСІ списки ресурсів
 	currentNodes = nil
 	currentNamespaces = nil
 	currentPods = nil
@@ -360,8 +390,13 @@ func loadAndUpdateState() {
 	currentReplicaSets = nil
 	currentJobs = nil
 	currentCronJobs = nil
+	currentConfigMaps = nil
+	currentSecrets = nil
+	currentServices = nil
+	currentIngresses = nil
 	selectedResourceType = "Nodes"
 	stateMu.Unlock()
+
 	var statusMsg string
 	if errCtxFile != nil && errCtxList != nil {
 		statusMsg = fmt.Sprintf("Помилка конт. та списку!")
@@ -375,6 +410,7 @@ func loadAndUpdateState() {
 	if statusBar != nil {
 		statusBar.SetText(statusMsg)
 	}
+
 	displayResourceList()
 	logDebug("Виклик оновлення UI віджетів після завантаження")
 	updateUIWidgets()
@@ -403,6 +439,10 @@ func loadSelectedResources() {
 		currentReplicaSets = nil
 		currentJobs = nil
 		currentCronJobs = nil
+		currentConfigMaps = nil
+		currentSecrets = nil
+		currentServices = nil
+		currentIngresses = nil
 		stateMu.Unlock()
 		displayResourceList()
 		updateUIWidgets()
@@ -412,8 +452,10 @@ func loadSelectedResources() {
 	if statusBar != nil {
 		statusBar.SetText(fmt.Sprintf("Завантаження %s для '%s'...", resType, getDisplayName(contextName)))
 	}
+
 	var err error
 	var statusMsg string = "OK"
+	// Створюємо локальні змінні для результатів
 	newNodes := []corev1.Node{}
 	newNamespaces := []corev1.Namespace{}
 	newPods := []corev1.Pod{}
@@ -423,9 +465,15 @@ func loadSelectedResources() {
 	newReplicaSets := []appsv1.ReplicaSet{}
 	newJobs := []batchv1.Job{}
 	newCronJobs := []batchv1.CronJob{}
+	newConfigMaps := []corev1.ConfigMap{}
+	newSecrets := []corev1.Secret{}
+	newServices := []corev1.Service{}
+	newIngresses := []networkingv1.Ingress{}
+
 	listOptions := metav1.ListOptions{}
 	ctxTimeout, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
+	// Очищуємо ВСІ глобальні списки перед заповненням одного
 	stateMu.Lock()
 	currentNodes = nil
 	currentNamespaces = nil
@@ -436,7 +484,12 @@ func loadSelectedResources() {
 	currentReplicaSets = nil
 	currentJobs = nil
 	currentCronJobs = nil
+	currentConfigMaps = nil
+	currentSecrets = nil
+	currentServices = nil
+	currentIngresses = nil
 	stateMu.Unlock()
+
 	switch resType {
 	case "Namespaces":
 		list, listErr := clientset.CoreV1().Namespaces().List(ctxTimeout, listOptions)
@@ -526,16 +579,60 @@ func loadSelectedResources() {
 			newCronJobs = list.Items
 			sort.Slice(newCronJobs, func(i, j int) bool { return newCronJobs[i].Name < newCronJobs[j].Name })
 		}
+	case "ConfigMaps":
+		logWarning("ЗАВАНТАЖЕННЯ ВСІХ CONFIGMAPS!")
+		list, listErr := clientset.CoreV1().ConfigMaps("").List(ctxTimeout, listOptions)
+		if listErr != nil {
+			err = listErr
+		} else {
+			logDebug("OK: %d CM", len(list.Items))
+			newConfigMaps = list.Items
+			sort.Slice(newConfigMaps, func(i, j int) bool { return newConfigMaps[i].Name < newConfigMaps[j].Name })
+		}
+	case "Secrets":
+		logWarning("ЗАВАНТАЖЕННЯ ВСІХ SECRETS!")
+		list, listErr := clientset.CoreV1().Secrets("").List(ctxTimeout, listOptions)
+		if listErr != nil {
+			err = listErr
+		} else {
+			logDebug("OK: %d Secrets", len(list.Items))
+			newSecrets = list.Items
+			sort.Slice(newSecrets, func(i, j int) bool { return newSecrets[i].Name < newSecrets[j].Name })
+		}
+	// Додано Services та Ingresses
+	case "Services":
+		logWarning("ЗАВАНТАЖЕННЯ ВСІХ SERVICES!")
+		list, listErr := clientset.CoreV1().Services("").List(ctxTimeout, listOptions)
+		if listErr != nil {
+			err = listErr
+		} else {
+			logDebug("OK: %d Svc", len(list.Items))
+			newServices = list.Items
+			sort.Slice(newServices, func(i, j int) bool { return newServices[i].Name < newServices[j].Name })
+		}
+	case "Ingresses":
+		logWarning("ЗАВАНТАЖЕННЯ ВСІХ INGRESSES!")
+		list, listErr := clientset.NetworkingV1().Ingresses("").List(ctxTimeout, listOptions)
+		if listErr != nil {
+			err = listErr
+		} else {
+			logDebug("OK: %d Ing", len(list.Items))
+			newIngresses = list.Items
+			sort.Slice(newIngresses, func(i, j int) bool { return newIngresses[i].Name < newIngresses[j].Name })
+		}
 	default:
 		logWarning("Невідомий тип ресурсу: %s", resType)
 		err = fmt.Errorf("тип %s не підтримується", resType)
 	}
+
 	if err != nil {
 		logError("Помилка завантаження %s: %v", resType, err)
 		statusMsg = fmt.Sprintf("Помилка %s: %v", resType, err)
 	}
+
+	// Оновлюємо глобальний стан
 	stateMu.Lock()
-	switch resType {
+	switch resType { // Зберігаємо ТІЛЬКИ завантажений тип
 	case "Namespaces":
 		currentNamespaces = newNamespaces
 	case "Nodes":
@@ -554,8 +651,18 @@ func loadSelectedResources() {
 		currentJobs = newJobs
 	case "CronJobs":
 		currentCronJobs = newCronJobs
+	case "ConfigMaps":
+		currentConfigMaps = newConfigMaps
+	case "Secrets":
+		currentSecrets = newSecrets
+	case "Services":
+		currentServices = newServices // Додано
+	case "Ingresses":
+		currentIngresses = newIngresses // Додано
 	}
 	stateMu.Unlock()
+
+	// Оновлюємо статус бар
 	if statusBar != nil {
 		if err == nil {
 			count := 0
@@ -578,11 +685,20 @@ func loadSelectedResources() {
 				count = len(newJobs)
 			case "CronJobs":
 				count = len(newCronJobs)
+			case "ConfigMaps":
+				count = len(newConfigMaps)
+			case "Secrets":
+				count = len(newSecrets)
+			case "Services":
+				count = len(newServices) // Додано
+			case "Ingresses":
+				count = len(newIngresses) // Додано
 			}
 			statusMsg = fmt.Sprintf("Підключено: %s | %s: %d", getDisplayName(contextName), resType, count)
 		}
 		statusBar.SetText(statusMsg)
 	}
+
 	displayResourceList()
 	updateUIWidgets()
 	logInfo("Завантаження '%s' завершено.", resType)
@@ -609,6 +725,10 @@ func connectLoadAndRefresh(ctxName string) {
 		currentReplicaSets = nil
 		currentJobs = nil
 		currentCronJobs = nil
+		currentConfigMaps = nil
+		currentSecrets = nil
+		currentServices = nil
+		currentIngresses = nil
 		logDebug("Збережено clientset: %s, вибрано тип: %s", ctxName, selectedResourceType)
 		stateMu.Unlock()
 		go loadSelectedResources()
@@ -625,6 +745,10 @@ func connectLoadAndRefresh(ctxName string) {
 		currentReplicaSets = nil
 		currentJobs = nil
 		currentCronJobs = nil
+		currentConfigMaps = nil
+		currentSecrets = nil
+		currentServices = nil
+		currentIngresses = nil
 		logDebug("Помилка підключення.")
 		stateMu.Unlock()
 		displayResourceList()
@@ -633,6 +757,7 @@ func connectLoadAndRefresh(ctxName string) {
 }
 
 // --- Функції для перемикання вмісту правої панелі ---
+// (Без змін)
 func displayResourceList() {
 	logDebug("Показ списку ресурсів")
 	if rightPanelContainer != nil && resourceListWidget != nil {
@@ -647,8 +772,12 @@ func displayResourceList() {
 }
 
 // --- Функції для показу деталей ресурсів ---
+// (createDetailRow, buildNodeDetailsView, buildPodDetailsView, buildNamespaceDetailsView, ..., buildCronJobDetailsView, buildConfigMapDetailsView, buildSecretDetailsView - без змін)
 func createDetailRow(key string, value string) *fyne.Container {
 	keyLabel := widget.NewLabelWithStyle(key+":", fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
+	if value == "" {
+		value = "<none>"
+	}
 	valueLabel := widget.NewLabel(value)
 	valueLabel.Wrapping = fyne.TextWrapWord
 	return container.NewBorder(nil, nil, keyLabel, nil, valueLabel)
@@ -819,6 +948,7 @@ func buildReplicaSetDetailsView(rs appsv1.ReplicaSet) fyne.CanvasObject {
 	backButton := widget.NewButton(labelBackToList, func() { displayResourceList() })
 	return container.NewBorder(backButton, nil, nil, nil, container.NewVScroll(detailsVBox))
 }
+
 func buildJobDetailsView(job batchv1.Job) fyne.CanvasObject {
 	logDebug("Створення деталей для Job: %s/%s", job.Namespace, job.Name)
 	detailsVBox := container.NewVBox()
@@ -834,11 +964,14 @@ func buildJobDetailsView(job batchv1.Job) fyne.CanvasObject {
 	if job.Spec.Parallelism != nil {
 		parallelism = fmt.Sprintf("%d", *job.Spec.Parallelism)
 	}
+	// Додаємо пропущений рядок:
 	detailsVBox.Add(createDetailRow("Parallelism", parallelism))
 	detailsVBox.Add(createDetailRow("Status", fmt.Sprintf("%d active, %d succeeded, %d failed", job.Status.Active, job.Status.Succeeded, job.Status.Failed)))
+	// TODO: Додати більше полів - Conditions, Template...
 	backButton := widget.NewButton(labelBackToList, func() { displayResourceList() })
 	return container.NewBorder(backButton, nil, nil, nil, container.NewVScroll(detailsVBox))
 }
+
 func buildCronJobDetailsView(cj batchv1.CronJob) fyne.CanvasObject {
 	logDebug("Створення деталей для CronJob: %s/%s", cj.Namespace, cj.Name)
 	detailsVBox := container.NewVBox()
@@ -861,8 +994,151 @@ func buildCronJobDetailsView(cj batchv1.CronJob) fyne.CanvasObject {
 	backButton := widget.NewButton(labelBackToList, func() { displayResourceList() })
 	return container.NewBorder(backButton, nil, nil, nil, container.NewVScroll(detailsVBox))
 }
+func buildConfigMapDetailsView(cm corev1.ConfigMap) fyne.CanvasObject {
+	logDebug("Створення деталей для ConfigMap: %s/%s", cm.Namespace, cm.Name)
+	detailsVBox := container.NewVBox()
+	detailsVBox.Add(createDetailRow("Name", cm.Name))
+	detailsVBox.Add(createDetailRow("Namespace", cm.Namespace))
+	detailsVBox.Add(createDetailRow("Created", cm.CreationTimestamp.Format(time.RFC1123)))
+	detailsVBox.Add(createDetailRow("Data Keys", fmt.Sprintf("%d", len(cm.Data))))
+	backButton := widget.NewButton(labelBackToList, func() { displayResourceList() })
+	return container.NewBorder(backButton, nil, nil, nil, container.NewVScroll(detailsVBox))
+}
+func buildSecretDetailsView(secret corev1.Secret) fyne.CanvasObject {
+	logDebug("Створення деталей для Secret: %s/%s", secret.Namespace, secret.Name)
+	detailsVBox := container.NewVBox()
+	detailsVBox.Add(createDetailRow("Name", secret.Name))
+	detailsVBox.Add(createDetailRow("Namespace", secret.Namespace))
+	detailsVBox.Add(createDetailRow("Created", secret.CreationTimestamp.Format(time.RFC1123)))
+	detailsVBox.Add(createDetailRow("Type", string(secret.Type)))
+	detailsVBox.Add(createDetailRow("Data Keys", fmt.Sprintf("%d", len(secret.Data))))
+	backButton := widget.NewButton(labelBackToList, func() { displayResourceList() })
+	return container.NewBorder(backButton, nil, nil, nil, container.NewVScroll(detailsVBox))
+}
 
-// Виправлено: Перейменовано функцію та змінено тип повернення
+// Додано функції деталей для Service та Ingress
+func buildServiceDetailsView(svc corev1.Service) fyne.CanvasObject {
+	logDebug("Створення деталей для Service: %s/%s", svc.Namespace, svc.Name)
+	detailsVBox := container.NewVBox()
+	detailsVBox.Add(createDetailRow("Name", svc.Name))
+	detailsVBox.Add(createDetailRow("Namespace", svc.Namespace))
+	detailsVBox.Add(createDetailRow("Created", svc.CreationTimestamp.Format(time.RFC1123)))
+	detailsVBox.Add(createDetailRow("Type", string(svc.Spec.Type)))
+	detailsVBox.Add(createDetailRow("Cluster IP(s)", strings.Join(svc.Spec.ClusterIPs, ", ")))
+	// External IPs (from LoadBalancer status)
+	externalIPs := []string{}
+	for _, ingress := range svc.Status.LoadBalancer.Ingress {
+		if ingress.IP != "" {
+			externalIPs = append(externalIPs, ingress.IP)
+		}
+		if ingress.Hostname != "" {
+			externalIPs = append(externalIPs, ingress.Hostname)
+		}
+	}
+	detailsVBox.Add(createDetailRow("External IP(s)", strings.Join(externalIPs, ", ")))
+	// Ports
+	portsStr := []string{}
+	for _, port := range svc.Spec.Ports {
+		pStr := fmt.Sprintf("%d", port.Port)
+		if port.NodePort > 0 {
+			pStr += fmt.Sprintf(":%d", port.NodePort)
+		}
+		pStr += "/" + string(port.Protocol)
+		if port.Name != "" {
+			pStr += " (" + port.Name + ")"
+		}
+		portsStr = append(portsStr, pStr)
+	}
+	detailsVBox.Add(createDetailRow("Ports", strings.Join(portsStr, ", ")))
+	// Selector
+	selectorStr := ""
+	if len(svc.Spec.Selector) > 0 {
+		parts := []string{}
+		for k, v := range svc.Spec.Selector {
+			parts = append(parts, fmt.Sprintf("%s=%s", k, v))
+		}
+		sort.Strings(parts)
+		selectorStr = strings.Join(parts, ",")
+	}
+	detailsVBox.Add(createDetailRow("Selector", selectorStr))
+
+	backButton := widget.NewButton(labelBackToList, func() { displayResourceList() })
+	return container.NewBorder(backButton, nil, nil, nil, container.NewVScroll(detailsVBox))
+}
+
+func buildIngressDetailsView(ing networkingv1.Ingress) fyne.CanvasObject {
+	logDebug("Створення деталей для Ingress: %s/%s", ing.Namespace, ing.Name)
+	detailsVBox := container.NewVBox()
+	detailsVBox.Add(createDetailRow("Name", ing.Name))
+	detailsVBox.Add(createDetailRow("Namespace", ing.Namespace))
+	detailsVBox.Add(createDetailRow("Created", ing.CreationTimestamp.Format(time.RFC1123)))
+	className := "<default>"
+	if ing.Spec.IngressClassName != nil {
+		className = *ing.Spec.IngressClassName
+	}
+	detailsVBox.Add(createDetailRow("Class Name", className))
+
+	// Rules
+	detailsVBox.Add(widget.NewSeparator())
+	detailsVBox.Add(widget.NewLabelWithStyle("Rules:", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}))
+	rulesBox := container.NewVBox()
+	if len(ing.Spec.Rules) == 0 {
+		rulesBox.Add(widget.NewLabel("  <none>"))
+	}
+	for _, rule := range ing.Spec.Rules {
+		host := rule.Host
+		if host == "" {
+			host = "*"
+		}
+		ruleStr := fmt.Sprintf(" - Host: %s", host)
+		if rule.HTTP != nil {
+			for _, path := range rule.HTTP.Paths {
+				pathType := "Prefix"
+				if path.PathType != nil {
+					pathType = string(*path.PathType)
+				}
+				ruleStr += fmt.Sprintf("\n   Path: %s (%s) -> %s:%d", path.Path, pathType, path.Backend.Service.Name, path.Backend.Service.Port.Number)
+			}
+		}
+		ruleLabel := widget.NewLabel(ruleStr)
+		ruleLabel.Wrapping = fyne.TextWrapWord
+		rulesBox.Add(ruleLabel)
+	}
+	detailsVBox.Add(rulesBox)
+
+	// TLS
+	if len(ing.Spec.TLS) > 0 {
+		detailsVBox.Add(widget.NewSeparator())
+		detailsVBox.Add(widget.NewLabelWithStyle("TLS:", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}))
+		tlsBox := container.NewVBox()
+		for _, tls := range ing.Spec.TLS {
+			tlsStr := fmt.Sprintf(" - Secret: %s, Hosts: %s", tls.SecretName, strings.Join(tls.Hosts, ", "))
+			tlsLabel := widget.NewLabel(tlsStr)
+			tlsLabel.Wrapping = fyne.TextWrapWord
+			tlsBox.Add(tlsLabel)
+		}
+		detailsVBox.Add(tlsBox)
+	}
+
+	// Status (LoadBalancer)
+	detailsVBox.Add(widget.NewSeparator())
+	detailsVBox.Add(widget.NewLabelWithStyle("LoadBalancer Status:", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}))
+	lbStatus := []string{}
+	for _, ingressStatus := range ing.Status.LoadBalancer.Ingress {
+		if ingressStatus.IP != "" {
+			lbStatus = append(lbStatus, ingressStatus.IP)
+		}
+		if ingressStatus.Hostname != "" {
+			lbStatus = append(lbStatus, ingressStatus.Hostname)
+		}
+	}
+	detailsVBox.Add(widget.NewLabel(strings.Join(lbStatus, ", ")))
+
+	backButton := widget.NewButton(labelBackToList, func() { displayResourceList() })
+	return container.NewBorder(backButton, nil, nil, nil, container.NewVScroll(detailsVBox))
+}
+
+// Заглушка для нереалізованих типів
 func buildNotImplementedDetailsView(resourceType, resourceName string) fyne.CanvasObject {
 	logDebug("Створення заглушки для деталей: %s %s", resourceType, resourceName)
 	detailsVBox := container.NewVBox()
@@ -871,11 +1147,8 @@ func buildNotImplementedDetailsView(resourceType, resourceName string) fyne.Canv
 	label.Alignment = fyne.TextAlignCenter
 	detailsVBox.Add(label)
 	backButton := widget.NewButton(labelBackToList, func() { displayResourceList() })
-	// Використовуємо Border для консистентності
 	return container.NewBorder(backButton, nil, nil, nil, container.NewPadded(detailsVBox))
 }
-
-// Виправлено: Перейменовано функцію та змінено тип повернення
 func buildErrorDetailsView(resourceType, resourceName string, err error) fyne.CanvasObject {
 	detailsVBox := container.NewVBox()
 	label := widget.NewLabel(fmt.Sprintf("Помилка завантаження деталей для %s '%s':\n%v", resourceType, resourceName, err))
@@ -933,7 +1206,7 @@ func openKubeFolder() {
 }
 
 // --- Створення меню Fyne ---
-// (Без змін)
+// (buildContextMenu, showWindowContextMenu без змін)
 func buildContextMenu() *fyne.Menu {
 	logDebug("Побудова меню Fyne...")
 	stateMu.RLock()
@@ -1129,10 +1402,18 @@ func main() {
 				return len(currentJobs)
 			case "CronJobs":
 				return len(currentCronJobs)
+			case "ConfigMaps":
+				return len(currentConfigMaps)
+			case "Secrets":
+				return len(currentSecrets)
+			case "Services":
+				return len(currentServices)
+			case "Ingresses":
+				return len(currentIngresses)
 			default:
 				return 0
 			}
-		},
+		}, // Оновлено Length
 		func() fyne.CanvasObject { return widget.NewLabel("template resource") },
 		func(id widget.ListItemID, item fyne.CanvasObject) {
 			stateMu.RLock()
@@ -1175,101 +1456,121 @@ func main() {
 				if id >= 0 && id < len(currentCronJobs) {
 					name = fmt.Sprintf("%s/%s", currentCronJobs[id].Namespace, currentCronJobs[id].Name)
 				}
+			case "ConfigMaps":
+				if id >= 0 && id < len(currentConfigMaps) {
+					name = fmt.Sprintf("%s/%s", currentConfigMaps[id].Namespace, currentConfigMaps[id].Name)
+				}
+			case "Secrets":
+				if id >= 0 && id < len(currentSecrets) {
+					name = fmt.Sprintf("%s/%s", currentSecrets[id].Namespace, currentSecrets[id].Name)
+				}
+			case "Services":
+				if id >= 0 && id < len(currentServices) {
+					name = fmt.Sprintf("%s/%s", currentServices[id].Namespace, currentServices[id].Name)
+				}
+			case "Ingresses":
+				if id >= 0 && id < len(currentIngresses) {
+					name = fmt.Sprintf("%s/%s", currentIngresses[id].Namespace, currentIngresses[id].Name)
+				}
 			}
 			stateMu.RUnlock()
 			item.(*widget.Label).SetText(name)
-		},
+		}, // Оновлено UpdateItem
 	)
-	// Оновлено OnSelected для виклику ПРАВИЛЬНИХ функцій деталей
+	// Оновлено OnSelected для виклику нових функцій деталей
 	resourceListWidget.OnSelected = func(id widget.ListItemID) {
 		stateMu.RLock()
 		resType := selectedResourceType
-		var detailWidget fyne.CanvasObject // Віджет, який буде показано
-		var resourceName string            // Для логування та заглушки
-
-		// Отримуємо об'єкт та викликаємо відповідну функцію побудови
+		var obj interface{}     // Узагальнений об'єкт
+		var resourceName string // Ім'я для заглушки/логування
+		// Отримуємо повний об'єкт зі зрізу
 		switch resType {
 		case "Namespaces":
 			if id >= 0 && id < len(currentNamespaces) {
-				obj := currentNamespaces[id]
-				resourceName = obj.Name
-				detailWidget = buildNamespaceDetailsView(obj)
+				obj = currentNamespaces[id]
+				resourceName = currentNamespaces[id].Name
 			}
 		case "Nodes":
 			if id >= 0 && id < len(currentNodes) {
-				obj := currentNodes[id]
-				resourceName = obj.Name
-				detailWidget = buildNodeDetailsView(obj)
+				obj = currentNodes[id]
+				resourceName = currentNodes[id].Name
 			}
 		case "Pods":
 			if id >= 0 && id < len(currentPods) {
-				obj := currentPods[id]
-				resourceName = obj.Name
-				detailWidget = buildPodDetailsView(obj)
+				obj = currentPods[id]
+				resourceName = currentPods[id].Name
 			}
 		case "Deployments":
 			if id >= 0 && id < len(currentDeployments) {
-				obj := currentDeployments[id]
-				resourceName = obj.Name
-				detailWidget = buildDeploymentDetailsView(obj)
+				obj = currentDeployments[id]
+				resourceName = currentDeployments[id].Name
 			}
 		case "StatefulSets":
 			if id >= 0 && id < len(currentStatefulSets) {
-				obj := currentStatefulSets[id]
-				resourceName = obj.Name
-				detailWidget = buildStatefulSetDetailsView(obj)
+				obj = currentStatefulSets[id]
+				resourceName = currentStatefulSets[id].Name
 			}
 		case "DaemonSets":
 			if id >= 0 && id < len(currentDaemonSets) {
-				obj := currentDaemonSets[id]
-				resourceName = obj.Name
-				detailWidget = buildDaemonSetDetailsView(obj)
+				obj = currentDaemonSets[id]
+				resourceName = currentDaemonSets[id].Name
 			}
 		case "ReplicaSets":
 			if id >= 0 && id < len(currentReplicaSets) {
-				obj := currentReplicaSets[id]
-				resourceName = obj.Name
-				detailWidget = buildReplicaSetDetailsView(obj)
+				obj = currentReplicaSets[id]
+				resourceName = currentReplicaSets[id].Name
 			}
 		case "Jobs":
 			if id >= 0 && id < len(currentJobs) {
-				obj := currentJobs[id]
-				resourceName = obj.Name
-				detailWidget = buildJobDetailsView(obj)
+				obj = currentJobs[id]
+				resourceName = currentJobs[id].Name
 			}
 		case "CronJobs":
 			if id >= 0 && id < len(currentCronJobs) {
-				obj := currentCronJobs[id]
-				resourceName = obj.Name
-				detailWidget = buildCronJobDetailsView(obj)
+				obj = currentCronJobs[id]
+				resourceName = currentCronJobs[id].Name
 			}
+		case "ConfigMaps":
+			if id >= 0 && id < len(currentConfigMaps) {
+				obj = currentConfigMaps[id]
+				resourceName = currentConfigMaps[id].Name
+			}
+		case "Secrets":
+			if id >= 0 && id < len(currentSecrets) {
+				obj = currentSecrets[id]
+				resourceName = currentSecrets[id].Name
+			}
+		case "Services":
+			if id >= 0 && id < len(currentServices) {
+				obj = currentServices[id]
+				resourceName = currentServices[id].Name
+			} // Додано
+		case "Ingresses":
+			if id >= 0 && id < len(currentIngresses) {
+				obj = currentIngresses[id]
+				resourceName = currentIngresses[id].Name
+			} // Додано
 		default:
 			logWarning("Вибрано ресурс невідомого типу '%s' для деталей", resType)
 		}
 		stateMu.RUnlock()
 
-		if detailWidget != nil { // Якщо віджет деталей створено
+		if obj != nil {
 			fullName := resourceName
-			// Якщо потрібен неймспейс для логу/статусу, його треба отримати разом з об'єктом вище
-			// stateMu.RLock(); if ns != "" { fullName = ns + "/" + resourceName }; stateMu.RUnlock() // Приклад
+			// Спробуємо отримати неймспейс, якщо він є у об'єкта (потрібно буде додати для інших типів при потребі)
+			if nsGetter, ok := obj.(interface{ GetNamespace() string }); ok {
+				if ns := nsGetter.GetNamespace(); ns != "" {
+					fullName = ns + "/" + resourceName
+				}
+			}
 			logInfo("Вибрано ресурс '%s': %s", resType, fullName)
 			if statusBar != nil {
 				statusBar.SetText(fmt.Sprintf("Вибрано %s: %s", resType, fullName))
 			}
-			// Оновлюємо праву панель
-			if rightPanelContainer != nil {
-				rightPanelContainer.Objects = []fyne.CanvasObject{detailWidget}
-				rightPanelContainer.Refresh()
-			}
-		} else if resourceName != "" { // Якщо об'єкт не вдалося отримати, але ім'я є
-			logWarning("Не вдалося отримати об'єкт для '%s': %s", resType, resourceName)
-			detailWidget = buildNotImplementedDetailsView(resType, resourceName) // Показуємо заглушку
-			if rightPanelContainer != nil {
-				rightPanelContainer.Objects = []fyne.CanvasObject{detailWidget}
-				rightPanelContainer.Refresh()
-			}
+			// Викликаємо універсальну функцію показу деталей
+			displayResourceDetails(resType, obj)
 		} else {
-			logWarning("Не вдалося отримати ідентифікатор/об'єкт для вибраного ресурсу типу '%s', ID: %d", resType, id)
+			logWarning("Не вдалося отримати об'єкт для вибраного ресурсу типу '%s', ID: %d", resType, id)
 		}
 	}
 
@@ -1291,4 +1592,65 @@ func main() {
 	go loadAndUpdateState()
 	mainWindow.ShowAndRun()
 	logInfo(logPrefix + " завершено.")
+}
+
+// --- Універсальна функція-диспетчер для показу деталей ---
+func displayResourceDetails(resType string, resource interface{}) {
+	var detailWidget fyne.CanvasObject
+	resourceName := "?" // Ім'я за замовчуванням для заглушки
+
+	// Використовуємо type assertion для виклику відповідної функції build...
+	switch data := resource.(type) {
+	case corev1.Namespace:
+		detailWidget = buildNamespaceDetailsView(data)
+		resourceName = data.Name
+	case corev1.Node:
+		detailWidget = buildNodeDetailsView(data)
+		resourceName = data.Name
+	case corev1.Pod:
+		detailWidget = buildPodDetailsView(data)
+		resourceName = data.Name
+	case appsv1.Deployment:
+		detailWidget = buildDeploymentDetailsView(data)
+		resourceName = data.Name
+	case appsv1.StatefulSet:
+		detailWidget = buildStatefulSetDetailsView(data)
+		resourceName = data.Name
+	case appsv1.DaemonSet:
+		detailWidget = buildDaemonSetDetailsView(data)
+		resourceName = data.Name
+	case appsv1.ReplicaSet:
+		detailWidget = buildReplicaSetDetailsView(data)
+		resourceName = data.Name
+	case batchv1.Job:
+		detailWidget = buildJobDetailsView(data)
+		resourceName = data.Name
+	case batchv1.CronJob:
+		detailWidget = buildCronJobDetailsView(data)
+		resourceName = data.Name
+	case corev1.ConfigMap:
+		detailWidget = buildConfigMapDetailsView(data)
+		resourceName = data.Name
+	case corev1.Secret:
+		detailWidget = buildSecretDetailsView(data)
+		resourceName = data.Name
+	case corev1.Service:
+		detailWidget = buildServiceDetailsView(data)
+		resourceName = data.Name // Додано
+	case networkingv1.Ingress:
+		detailWidget = buildIngressDetailsView(data)
+		resourceName = data.Name // Додано
+	default:
+		logWarning("Немає функції деталей для типу %T", resource)
+		detailWidget = buildNotImplementedDetailsView(resType, resourceName)
+	}
+
+	// Оновлюємо праву панель
+	if rightPanelContainer != nil && detailWidget != nil {
+		logDebug("Перемикання правої панелі на деталі для %s", resourceName)
+		rightPanelContainer.Objects = []fyne.CanvasObject{detailWidget}
+		rightPanelContainer.Refresh()
+	} else {
+		logError("Помилка при оновленні правої панелі для деталей %s", resourceName)
+	}
 }
