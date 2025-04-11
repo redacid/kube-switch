@@ -2,7 +2,7 @@ package main
 
 import (
 	"context"
-	"embed" // Залишаємо імпорт
+	"embed"
 	// "errors"
 	"fmt"
 	"log"
@@ -39,14 +39,10 @@ import (
 
 //go:embed icon.png
 var iconData []byte
-
-// Хак для компілятора, щоб гарантовано "бачити" використання пакету embed
-var _ embed.FS // <--- ДОДАНО ХАК
-
-// --- Решта коду без змін ---
+var _ embed.FS
 
 const enableDebugLogging = true
-const logPrefix = "GoKubeLens(Step6-EmbedHack)" // Оновлено префікс
+const logPrefix = "GoKubeLens(Step6-DetailLayoutFix2)" // Оновлено префікс
 const maxContextItems = 50
 
 const labelLoading = "Завантаження..."
@@ -106,6 +102,7 @@ func logWarning(format string, v ...interface{}) { log.Printf(logPrefix+" [WARN]
 func logError(format string, v ...interface{})   { log.Printf(logPrefix+" [ERROR]: "+format, v...) }
 
 // --- Робота з Kubeconfig (clientcmd) ---
+// (Без змін)
 func loadKubeConfig() (*api.Config, string, error) {
 	stateMu.RLock()
 	rules := loadingRules
@@ -186,6 +183,7 @@ func switchContext(contextName string) error {
 }
 
 // --- Підключення до кластера ---
+// (Без змін)
 func connectToCluster(contextName string) (*kubernetes.Clientset, string, error) {
 	logInfo("Спроба підключення до: %s", contextName)
 	if statusBar != nil {
@@ -243,6 +241,7 @@ func getDisplayName(contextName string) string {
 }
 
 // --- Оновлення UI віджетів Fyne ---
+// (Без змін)
 func updateUIWidgets() {
 	logDebug("Оновлення UI віджетів (Fyne)...")
 	stateMu.RLock()
@@ -335,6 +334,7 @@ func updateUIWidgets() {
 }
 
 // --- Завантаження даних, оновлення стану та ВИКЛИК оновлення UI ---
+// (Без змін)
 func loadAndUpdateState() {
 	logInfo("Завантаження конфігурації та оновлення стану...")
 	if statusBar != nil {
@@ -386,6 +386,7 @@ func loadAndUpdateState() {
 }
 
 // --- Завантаження вибраних ресурсів ---
+// (Без змін)
 func loadSelectedResources() {
 	stateMu.RLock()
 	clientset := currentClientset
@@ -593,6 +594,7 @@ func loadSelectedResources() {
 }
 
 // Обгортка для підключення та початкового завантаження ресурсів
+// (Без змін)
 func connectLoadAndRefresh(ctxName string) {
 	displayResourceList()
 	if resourceListWidget != nil {
@@ -637,6 +639,7 @@ func connectLoadAndRefresh(ctxName string) {
 }
 
 // --- Функції для перемикання вмісту правої панелі ---
+// (Без змін)
 func displayResourceList() {
 	logDebug("Показ списку ресурсів")
 	if rightPanelContainer != nil && resourceListWidget != nil {
@@ -651,120 +654,177 @@ func displayResourceList() {
 }
 
 // --- Функції для показу деталей ресурсів ---
+
+// Допоміжна функція для створення рядка "Ключ: Значення" для деталей
+func createDetailRow(key string, value string) *fyne.Container {
+	keyLabel := widget.NewLabelWithStyle(key+":", fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
+	valueLabel := widget.NewLabel(value)
+	valueLabel.Wrapping = fyne.TextWrapWord // Завжди встановлюємо перенос
+	// Використовуємо Border для кращого контролю ширини значення
+	return container.NewBorder(nil, nil, keyLabel, nil, valueLabel)
+}
+
+// Виправлено displayNodeDetails з новим компонуванням рядків
 func displayNodeDetails(node corev1.Node) {
 	logDebug("Показ деталей для вузла: %s", node.Name)
-	if rightPanelContainer != nil {
-		form := widget.NewForm()
-		form.Append("Name", widget.NewLabel(node.Name))
-		form.Append("Created", widget.NewLabel(node.CreationTimestamp.Format(time.RFC1123)))
-		statusStr := ""
-		for _, cond := range node.Status.Conditions {
-			if cond.Status == corev1.ConditionTrue {
-				statusStr += string(cond.Type) + " "
-			}
-		}
-		if statusStr == "" {
-			statusStr = "Unknown"
-		}
-		form.Append("Status", widget.NewLabel(strings.TrimSpace(statusStr)))
-		roles := []string{}
-		for label := range node.Labels {
-			if strings.HasPrefix(label, "node-role.kubernetes.io/") {
-				roles = append(roles, strings.TrimPrefix(label, "node-role.kubernetes.io/"))
-			}
-		}
-		if len(roles) == 0 {
-			roles = append(roles, "<none>")
-		}
-		sort.Strings(roles)
-		form.Append("Roles", widget.NewLabel(strings.Join(roles, ", ")))
-		form.Append("Kubelet Version", widget.NewLabel(node.Status.NodeInfo.KubeletVersion))
-		form.Append("OS Image", widget.NewLabel(node.Status.NodeInfo.OSImage))
-		form.Append("Kernel Version", widget.NewLabel(node.Status.NodeInfo.KernelVersion))
-		form.Append("Container Runtime", widget.NewLabel(node.Status.NodeInfo.ContainerRuntimeVersion))
-		internalIP := ""
-		externalIP := ""
-		for _, addr := range node.Status.Addresses {
-			if addr.Type == corev1.NodeInternalIP {
-				internalIP = addr.Address
-			}
-			if addr.Type == corev1.NodeExternalIP {
-				externalIP = addr.Address
-			}
-		}
-		form.Append("Internal IP", widget.NewLabel(internalIP))
-		form.Append("External IP", widget.NewLabel(externalIP))
-		cpu := node.Status.Capacity[corev1.ResourceCPU]
-		mem := node.Status.Capacity[corev1.ResourceMemory]
-		pods := node.Status.Capacity[corev1.ResourcePods]
-		form.Append("CPU (Capacity)", widget.NewLabel(cpu.String()))
-		form.Append("Memory (Capacity)", widget.NewLabel(mem.String()))
-		form.Append("Pods (Capacity)", widget.NewLabel(pods.String()))
-		backButton := widget.NewButton(labelBackToList, func() { displayResourceList() })
-		detailView := container.NewBorder(backButton, nil, nil, nil, container.NewVScroll(form))
-		rightPanelContainer.Objects = []fyne.CanvasObject{detailView}
-		rightPanelContainer.Refresh()
-	} else {
-		logError("rightPanelContainer є nil при показі деталей Node")
+	if rightPanelContainer == nil {
+		logError("rightPanelContainer є nil...")
+		return
 	}
+
+	detailsVBox := container.NewVBox() // Головний контейнер для всіх рядків
+
+	detailsVBox.Add(createDetailRow("Name", node.Name))
+	detailsVBox.Add(createDetailRow("Created", node.CreationTimestamp.Format(time.RFC1123)))
+
+	statusStr := ""
+	for _, cond := range node.Status.Conditions {
+		if cond.Status == corev1.ConditionTrue {
+			statusStr += string(cond.Type) + " "
+		}
+	}
+	if statusStr == "" {
+		statusStr = "Unknown"
+	}
+	detailsVBox.Add(createDetailRow("Status", strings.TrimSpace(statusStr)))
+
+	roles := []string{}
+	for label := range node.Labels {
+		if strings.HasPrefix(label, "node-role.kubernetes.io/") {
+			roles = append(roles, strings.TrimPrefix(label, "node-role.kubernetes.io/"))
+		}
+	}
+	if len(roles) == 0 {
+		roles = append(roles, "<none>")
+	}
+	sort.Strings(roles)
+	detailsVBox.Add(createDetailRow("Roles", strings.Join(roles, ", ")))
+
+	detailsVBox.Add(widget.NewSeparator())
+
+	detailsVBox.Add(createDetailRow("Kubelet Version", node.Status.NodeInfo.KubeletVersion))
+	detailsVBox.Add(createDetailRow("OS Image", node.Status.NodeInfo.OSImage))
+	detailsVBox.Add(createDetailRow("Kernel Version", node.Status.NodeInfo.KernelVersion))
+	detailsVBox.Add(createDetailRow("Container Runtime", node.Status.NodeInfo.ContainerRuntimeVersion))
+
+	detailsVBox.Add(widget.NewSeparator())
+
+	internalIP := ""
+	externalIP := ""
+	for _, addr := range node.Status.Addresses {
+		if addr.Type == corev1.NodeInternalIP {
+			internalIP = addr.Address
+		}
+		if addr.Type == corev1.NodeExternalIP {
+			externalIP = addr.Address
+		}
+	}
+	detailsVBox.Add(createDetailRow("Internal IP", internalIP))
+	detailsVBox.Add(createDetailRow("External IP", externalIP))
+
+	detailsVBox.Add(widget.NewSeparator())
+
+	cpu := node.Status.Capacity[corev1.ResourceCPU]
+	mem := node.Status.Capacity[corev1.ResourceMemory]
+	pods := node.Status.Capacity[corev1.ResourcePods]
+	detailsVBox.Add(createDetailRow("CPU (Capacity)", cpu.String()))
+	detailsVBox.Add(createDetailRow("Memory (Capacity)", mem.String()))
+	detailsVBox.Add(createDetailRow("Pods (Capacity)", pods.String()))
+
+	backButton := widget.NewButton(labelBackToList, func() { displayResourceList() })
+	detailView := container.NewBorder(backButton, nil, nil, nil, container.NewVScroll(detailsVBox))
+
+	rightPanelContainer.Objects = []fyne.CanvasObject{detailView}
+	rightPanelContainer.Refresh()
 }
+
+// Виправлено displayPodDetails з новим компонуванням рядків
 func displayPodDetails(pod corev1.Pod) {
 	logDebug("Показ деталей для пода: %s/%s", pod.Namespace, pod.Name)
-	if rightPanelContainer != nil {
-		form := widget.NewForm()
-		form.Append("Name", widget.NewLabel(pod.Name))
-		form.Append("Namespace", widget.NewLabel(pod.Namespace))
-		form.Append("Created", widget.NewLabel(pod.CreationTimestamp.Format(time.RFC1123)))
-		form.Append("Status", widget.NewLabel(string(pod.Status.Phase)))
-		if pod.Status.Reason != "" {
-			form.Append("Reason", widget.NewLabel(pod.Status.Reason))
-		}
-		form.Append("Pod IP", widget.NewLabel(pod.Status.PodIP))
-		form.Append("Node", widget.NewLabel(pod.Spec.NodeName))
-		containerStatuses := []string{}
-		for _, cs := range pod.Status.ContainerStatuses {
-			status := fmt.Sprintf("%s (Restarts: %d, Ready: %v, Image: %s)", cs.Name, cs.RestartCount, cs.Ready, cs.Image)
-			containerStatuses = append(containerStatuses, status)
-		}
-		if len(containerStatuses) > 0 {
-			form.Append("Containers", widget.NewLabel(strings.Join(containerStatuses, "\n")))
-		}
-		owners := []string{}
-		for _, owner := range pod.OwnerReferences {
-			owners = append(owners, fmt.Sprintf("%s/%s", owner.Kind, owner.Name))
-		}
-		if len(owners) > 0 {
-			form.Append("Controlled By", widget.NewLabel(strings.Join(owners, ", ")))
-		}
-		backButton := widget.NewButton(labelBackToList, func() { displayResourceList() })
-		detailView := container.NewBorder(backButton, nil, nil, nil, container.NewVScroll(form))
-		rightPanelContainer.Objects = []fyne.CanvasObject{detailView}
-		rightPanelContainer.Refresh()
-	} else {
-		logError("rightPanelContainer є nil при показі деталей Pod")
+	if rightPanelContainer == nil {
+		logError("rightPanelContainer є nil...")
+		return
 	}
+
+	detailsVBox := container.NewVBox()
+
+	detailsVBox.Add(createDetailRow("Name", pod.Name))
+	detailsVBox.Add(createDetailRow("Namespace", pod.Namespace))
+	detailsVBox.Add(createDetailRow("Created", pod.CreationTimestamp.Format(time.RFC1123)))
+	detailsVBox.Add(createDetailRow("Status", string(pod.Status.Phase)))
+	if pod.Status.Reason != "" {
+		detailsVBox.Add(createDetailRow("Reason", pod.Status.Reason))
+	}
+	detailsVBox.Add(createDetailRow("Pod IP", pod.Status.PodIP))
+	detailsVBox.Add(createDetailRow("Node", pod.Spec.NodeName))
+
+	owners := []string{}
+	for _, owner := range pod.OwnerReferences {
+		owners = append(owners, fmt.Sprintf("%s/%s", owner.Kind, owner.Name))
+	}
+	if len(owners) > 0 {
+		detailsVBox.Add(createDetailRow("Controlled By", strings.Join(owners, ", ")))
+	}
+
+	detailsVBox.Add(widget.NewSeparator())
+	detailsVBox.Add(widget.NewLabelWithStyle("Containers:", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}))
+	containerBox := container.NewVBox()
+	for _, cs := range pod.Status.ContainerStatuses {
+		// Форматуємо багаторядковий статус для кожного контейнера
+		status := fmt.Sprintf("Name: %s\n  Ready: %v\n  Restarts: %d\n  Image: %s", cs.Name, cs.Ready, cs.RestartCount, cs.Image)
+		contLabel := widget.NewLabel(status)
+		contLabel.Wrapping = fyne.TextWrapWord
+		containerBox.Add(contLabel)
+		containerBox.Add(widget.NewSeparator()) // Роздільник між контейнерами
+	}
+	if len(pod.Status.ContainerStatuses) == 0 {
+		containerBox.Add(widget.NewLabel("  <none>"))
+	}
+	detailsVBox.Add(containerBox)
+
+	backButton := widget.NewButton(labelBackToList, func() { displayResourceList() })
+	detailView := container.NewBorder(backButton, nil, nil, nil, container.NewVScroll(detailsVBox))
+
+	rightPanelContainer.Objects = []fyne.CanvasObject{detailView}
+	rightPanelContainer.Refresh()
 }
+
+// Виправлено displayNotImplementedDetails з новим компонуванням рядків
 func displayNotImplementedDetails(resourceType, resourceName string) {
 	logDebug("Показ заглушки для деталей: %s %s", resourceType, resourceName)
-	if rightPanelContainer != nil {
-		label := widget.NewLabel(fmt.Sprintf("Детальний вигляд для типу '%s' ('%s') ще не реалізовано.", resourceType, resourceName))
-		label.Wrapping = fyne.TextWrapWord
-		backButton := widget.NewButton(labelBackToList, func() { displayResourceList() })
-		detailView := container.NewBorder(backButton, nil, nil, nil, container.NewCenter(label))
-		rightPanelContainer.Objects = []fyne.CanvasObject{detailView}
-		rightPanelContainer.Refresh()
-	} else {
-		logError("rightPanelContainer є nil при показі заглушки деталей")
+	if rightPanelContainer == nil {
+		logError("rightPanelContainer є nil...")
+		return
 	}
+
+	detailsVBox := container.NewVBox()
+	label := widget.NewLabel(fmt.Sprintf("Детальний вигляд для типу '%s' ('%s') ще не реалізовано.", resourceType, resourceName))
+	label.Wrapping = fyne.TextWrapWord
+	label.Alignment = fyne.TextAlignCenter
+	detailsVBox.Add(label) // Додаємо мітку у VBox
+
+	backButton := widget.NewButton(labelBackToList, func() { displayResourceList() })
+	// Використовуємо Border: кнопка зверху, VBox (з міткою) - в центрі
+	detailView := container.NewBorder(backButton, nil, nil, nil, container.NewPadded(detailsVBox))
+
+	rightPanelContainer.Objects = []fyne.CanvasObject{detailView}
+	rightPanelContainer.Refresh()
 }
+
+// Виправлено buildErrorDetailsView з новим компонуванням рядків
 func buildErrorDetailsView(resourceType, resourceName string, err error) fyne.CanvasObject {
+	detailsVBox := container.NewVBox()
 	label := widget.NewLabel(fmt.Sprintf("Помилка завантаження деталей для %s '%s':\n%v", resourceType, resourceName, err))
 	label.Wrapping = fyne.TextWrapWord
+	label.Alignment = fyne.TextAlignCenter
+	detailsVBox.Add(label)
+
 	backButton := widget.NewButton(labelBackToList, func() { displayResourceList() })
-	return container.NewBorder(backButton, nil, nil, nil, container.NewCenter(label))
+	return container.NewBorder(backButton, nil, nil, nil, container.NewPadded(detailsVBox))
 }
 
 // --- Допоміжні функції ---
+// (initializeLoadingRules, openKubeFolder без змін)
 func initializeLoadingRules() {
 	stateMu.Lock()
 	defer stateMu.Unlock()
@@ -810,6 +870,7 @@ func openKubeFolder() {
 }
 
 // --- Створення меню Fyne ---
+// (Без змін)
 func buildContextMenu() *fyne.Menu {
 	logDebug("Побудова меню Fyne...")
 	stateMu.RLock()
@@ -863,6 +924,7 @@ func showWindowContextMenu(pos fyne.Position) {
 }
 
 // --- Допоміжний тип для обробки правого кліку на контейнері ---
+// (Без змін)
 type tappableContainer struct {
 	widget.BaseWidget
 	content fyne.CanvasObject
@@ -1052,18 +1114,19 @@ func main() {
 			item.(*widget.Label).SetText(name)
 		},
 	)
-	// Оновлений OnSelected для показу деталей
 	resourceListWidget.OnSelected = func(id widget.ListItemID) {
 		stateMu.RLock()
 		resType := selectedResourceType
 		var resourceName, resourceNamespace string
 		var node *corev1.Node
 		var pod *corev1.Pod
-		// Потрібно буде додати отримання об'єктів для інших типів тут
+		var namespace *corev1.Namespace
 		switch resType {
 		case "Namespaces":
 			if id >= 0 && id < len(currentNamespaces) {
-				resourceName = currentNamespaces[id].Name
+				nsCopy := currentNamespaces[id]
+				namespace = &nsCopy
+				resourceName = namespace.Name
 				resourceNamespace = ""
 			}
 		case "Nodes":
@@ -1114,7 +1177,6 @@ func main() {
 			logWarning("Вибрано ресурс невідомого типу '%s' для деталей", resType)
 		}
 		stateMu.RUnlock()
-
 		if resourceName != "" {
 			fullName := resourceName
 			if resourceNamespace != "" {
@@ -1124,7 +1186,6 @@ func main() {
 			if statusBar != nil {
 				statusBar.SetText(fmt.Sprintf("Вибрано %s: %s", resType, fullName))
 			}
-			// Викликаємо відповідну функцію показу деталей
 			switch resType {
 			case "Nodes":
 				if node != nil {
@@ -1138,8 +1199,14 @@ func main() {
 				} else {
 					logError("Не вдалося отримати Pod для деталей")
 				}
+			case "Namespaces":
+				if namespace != nil {
+					displayNamespaceDetails(*namespace)
+				} else {
+					logError("Не вдалося отримати Namespace для деталей")
+				}
 			default:
-				displayNotImplementedDetails(resType, resourceName) // Показуємо заглушку
+				displayNotImplementedDetails(resType, resourceName)
 			}
 		} else {
 			logWarning("Не вдалося отримати ідентифікатор для вибраного ресурсу типу '%s', ID: %d", resType, id)
@@ -1149,8 +1216,7 @@ func main() {
 	// --- Збираємо макет вікна ---
 	leftPanelContent := container.NewVSplit(container.NewBorder(container.NewPadded(widget.NewLabel("Контексти:")), nil, nil, nil, contextListWidget), container.NewBorder(container.NewPadded(widget.NewLabel("Ресурси:")), nil, nil, nil, resourceTypeTree))
 	leftPanelContent.Offset = 0.5
-	// Виправлення 2: Ініціалізуємо rightPanelContainer як container.NewMax
-	rightPanelContainer = container.NewMax(resourceListWidget) // Починаємо зі списку ресурсів
+	rightPanelContainer = container.NewMax(resourceListWidget)
 	tappableRightPanel := &tappableContainer{content: rightPanelContainer}
 	tappableRightPanel.ExtendBaseWidget(tappableRightPanel)
 	split := container.NewHSplit(leftPanelContent, tappableRightPanel)
@@ -1162,7 +1228,57 @@ func main() {
 	mainWindow.CenterOnScreen()
 	mainWindow.SetCloseIntercept(func() { logInfo("Закриття вікна..."); fyneApp.Quit() })
 
-	go loadAndUpdateState() // Викликаємо перейменовану/виправлену функцію
+	go loadAndUpdateState()
 	mainWindow.ShowAndRun()
 	logInfo(logPrefix + " завершено.")
+}
+
+// --- Додано функцію для деталей Namespace ---
+// Перероблено з новим компонуванням рядків
+func displayNamespaceDetails(ns corev1.Namespace) {
+	logDebug("Показ деталей для Namespace: %s", ns.Name)
+	if rightPanelContainer == nil {
+		logError("rightPanelContainer є nil...")
+		return
+	}
+
+	detailsVBox := container.NewVBox()
+
+	detailsVBox.Add(createDetailRow("Name", ns.Name))
+	detailsVBox.Add(createDetailRow("Created", ns.CreationTimestamp.Format(time.RFC1123)))
+	detailsVBox.Add(createDetailRow("Status", string(ns.Status.Phase)))
+
+	// Мітки (Labels)
+	if len(ns.Labels) > 0 {
+		detailsVBox.Add(widget.NewSeparator())
+		detailsVBox.Add(widget.NewLabelWithStyle("Labels:", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}))
+		keys := make([]string, 0, len(ns.Labels))
+		for k := range ns.Labels {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			detailsVBox.Add(createDetailRow("  "+k, ns.Labels[k]))
+		} // Відступ для ключів міток
+	}
+
+	// Анотації (Annotations)
+	if len(ns.Annotations) > 0 {
+		detailsVBox.Add(widget.NewSeparator())
+		detailsVBox.Add(widget.NewLabelWithStyle("Annotations:", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}))
+		keys := make([]string, 0, len(ns.Annotations))
+		for k := range ns.Annotations {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			detailsVBox.Add(createDetailRow("  "+k, ns.Annotations[k]))
+		} // Відступ для ключів анотацій
+	}
+
+	backButton := widget.NewButton(labelBackToList, func() { displayResourceList() })
+	detailView := container.NewBorder(backButton, nil, nil, nil, container.NewVScroll(detailsVBox))
+
+	rightPanelContainer.Objects = []fyne.CanvasObject{detailView}
+	rightPanelContainer.Refresh()
 }
