@@ -32,6 +32,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1" // Додано для Ingress
 	rbacv1 "k8s.io/api/rbac/v1"
+	storagev1 "k8s.io/api/storage/v1" // Додано для Storage
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
@@ -97,11 +98,16 @@ var (
 	currentRoleBindings        []rbacv1.RoleBinding
 	currentClusterRoles        []rbacv1.ClusterRole
 	currentClusterRoleBindings []rbacv1.ClusterRoleBinding
-	kubeconfigFile             string
-	isKubeconfigEnvSet         bool
-	loadingRules               clientcmd.ClientConfigLoadingRules
-	currentClientset           *kubernetes.Clientset
-	stateMu                    sync.RWMutex
+	// Storage
+	currentPersistentVolumes      []corev1.PersistentVolume
+	currentPersistentVolumeClaims []corev1.PersistentVolumeClaim
+	currentStorageClasses         []storagev1.StorageClass
+
+	kubeconfigFile     string
+	isKubeconfigEnvSet bool
+	loadingRules       clientcmd.ClientConfigLoadingRules
+	currentClientset   *kubernetes.Clientset
+	stateMu            sync.RWMutex
 )
 
 func logDebug(format string, v ...interface{}) {
@@ -284,6 +290,11 @@ func updateUIWidgets() {
 	roleBindingCount := len(currentRoleBindings)
 	clusterRoleCount := len(currentClusterRoles)
 	clusterRoleBindingCount := len(currentClusterRoleBindings)
+	// Storage Counts
+	pvCount := len(currentPersistentVolumes)
+	pvcCount := len(currentPersistentVolumeClaims)
+	scCount := len(currentStorageClasses)
+
 	stateMu.RUnlock()
 
 	displayCtxFromFile := labelNoContext
@@ -362,6 +373,12 @@ func updateUIWidgets() {
 			resourceCount = clusterRoleCount
 		case "ClusterRoleBindings": // Додано
 			resourceCount = clusterRoleBindingCount
+		case "PersistentVolumes": // Додано
+			resourceCount = pvCount
+		case "PersistentVolumeClaims": // Додано
+			resourceCount = pvcCount
+		case "StorageClasses": // Додано
+			resourceCount = scCount
 		// Додайте інші типи тут...
 		default:
 			resourceCount = 0
@@ -496,7 +513,10 @@ func loadSelectedResources() {
 	newRoleBindings := []rbacv1.RoleBinding{}               // Додано
 	newClusterRoles := []rbacv1.ClusterRole{}               // Додано
 	newClusterRoleBindings := []rbacv1.ClusterRoleBinding{} // Додано
-
+	// Storage
+	newPersistentVolumes := []corev1.PersistentVolume{}           // Додано
+	newPersistentVolumeClaims := []corev1.PersistentVolumeClaim{} // Додано
+	newStorageClasses := []storagev1.StorageClass{}               // Додано
 	listOptions := metav1.ListOptions{}
 	ctxTimeout, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -697,6 +717,36 @@ func loadSelectedResources() {
 			newClusterRoleBindings = list.Items
 			sort.Slice(newClusterRoleBindings, func(i, j int) bool { return newClusterRoleBindings[i].Name < newClusterRoleBindings[j].Name })
 		}
+	case "PersistentVolumes": // Додано
+		logWarning("ЗАВАНТАЖЕННЯ ВСІХ PERSISTENTVOLUMES!")
+		list, listErr := clientset.CoreV1().PersistentVolumes().List(ctxTimeout, listOptions)
+		if listErr != nil {
+			err = listErr
+		} else {
+			logDebug("OK: %d PersistentVolumes", len(list.Items))
+			newPersistentVolumes = list.Items
+			sort.Slice(newPersistentVolumes, func(i, j int) bool { return newPersistentVolumes[i].Name < newPersistentVolumes[j].Name })
+		}
+	case "PersistentVolumeClaims": // Додано
+		logWarning("ЗАВАНТАЖЕННЯ ВСІХ PERSISTENTVOLUMECLAIMS!")
+		list, listErr := clientset.CoreV1().PersistentVolumeClaims("").List(ctxTimeout, listOptions)
+		if listErr != nil {
+			err = listErr
+		} else {
+			logDebug("OK: %d PersistentVolumeClaims", len(list.Items))
+			newPersistentVolumeClaims = list.Items
+			sort.Slice(newPersistentVolumeClaims, func(i, j int) bool { return newPersistentVolumeClaims[i].Name < newPersistentVolumeClaims[j].Name })
+		}
+	case "StorageClasses": // Додано
+		logWarning("ЗАВАНТАЖЕННЯ ВСІХ STORAGECLASSES!")
+		list, listErr := clientset.StorageV1().StorageClasses().List(ctxTimeout, listOptions)
+		if listErr != nil {
+			err = listErr
+		} else {
+			logDebug("OK: %d StorageClasses", len(list.Items))
+			newStorageClasses = list.Items
+			sort.Slice(newStorageClasses, func(i, j int) bool { return newStorageClasses[i].Name < newStorageClasses[j].Name })
+		}
 	default:
 		logWarning("Невідомий тип ресурсу: %s", resType)
 		err = fmt.Errorf("тип %s не підтримується", resType)
@@ -746,6 +796,12 @@ func loadSelectedResources() {
 		currentClusterRoles = newClusterRoles
 	case "ClusterRoleBindings": // Додано
 		currentClusterRoleBindings = newClusterRoleBindings
+	case "PersistentVolumes": // Додано
+		currentPersistentVolumes = newPersistentVolumes
+	case "PersistentVolumeClaims": // Додано
+		currentPersistentVolumeClaims = newPersistentVolumeClaims
+	case "StorageClasses": // Додано
+		currentStorageClasses = newStorageClasses
 	}
 	stateMu.Unlock()
 
@@ -1035,7 +1091,6 @@ func buildReplicaSetDetailsView(rs appsv1.ReplicaSet) fyne.CanvasObject {
 	backButton := widget.NewButton(labelBackToList, func() { displayResourceList() })
 	return container.NewBorder(backButton, nil, nil, nil, container.NewVScroll(detailsVBox))
 }
-
 func buildJobDetailsView(job batchv1.Job) fyne.CanvasObject {
 	logDebug("Створення деталей для Job: %s/%s", job.Namespace, job.Name)
 	detailsVBox := container.NewVBox()
@@ -1058,7 +1113,6 @@ func buildJobDetailsView(job batchv1.Job) fyne.CanvasObject {
 	backButton := widget.NewButton(labelBackToList, func() { displayResourceList() })
 	return container.NewBorder(backButton, nil, nil, nil, container.NewVScroll(detailsVBox))
 }
-
 func buildCronJobDetailsView(cj batchv1.CronJob) fyne.CanvasObject {
 	logDebug("Створення деталей для CronJob: %s/%s", cj.Namespace, cj.Name)
 	detailsVBox := container.NewVBox()
@@ -1102,8 +1156,6 @@ func buildSecretDetailsView(secret corev1.Secret) fyne.CanvasObject {
 	backButton := widget.NewButton(labelBackToList, func() { displayResourceList() })
 	return container.NewBorder(backButton, nil, nil, nil, container.NewVScroll(detailsVBox))
 }
-
-// Додано функції деталей для Service та Ingress
 func buildServiceDetailsView(svc corev1.Service) fyne.CanvasObject {
 	logDebug("Створення деталей для Service: %s/%s", svc.Namespace, svc.Name)
 	detailsVBox := container.NewVBox()
@@ -1152,7 +1204,6 @@ func buildServiceDetailsView(svc corev1.Service) fyne.CanvasObject {
 	backButton := widget.NewButton(labelBackToList, func() { displayResourceList() })
 	return container.NewBorder(backButton, nil, nil, nil, container.NewVScroll(detailsVBox))
 }
-
 func buildIngressDetailsView(ing networkingv1.Ingress) fyne.CanvasObject {
 	logDebug("Створення деталей для Ingress: %s/%s", ing.Namespace, ing.Name)
 	detailsVBox := container.NewVBox()
@@ -1224,7 +1275,6 @@ func buildIngressDetailsView(ing networkingv1.Ingress) fyne.CanvasObject {
 	backButton := widget.NewButton(labelBackToList, func() { displayResourceList() })
 	return container.NewBorder(backButton, nil, nil, nil, container.NewVScroll(detailsVBox))
 }
-
 func buildServiceAccountDetailsView(sa corev1.ServiceAccount) fyne.CanvasObject {
 	logDebug("Створення деталей для ServiceAccount: %s/%s", sa.Namespace, sa.Name)
 	detailsVBox := container.NewVBox()
@@ -1235,7 +1285,6 @@ func buildServiceAccountDetailsView(sa corev1.ServiceAccount) fyne.CanvasObject 
 	backButton := widget.NewButton(labelBackToList, func() { displayResourceList() })
 	return container.NewBorder(backButton, nil, nil, nil, container.NewVScroll(detailsVBox))
 }
-
 func buildRoleDetailsView(role rbacv1.Role) fyne.CanvasObject {
 	logDebug("Створення деталей для Role: %s/%s", role.Namespace, role.Name)
 	detailsVBox := container.NewVBox()
@@ -1246,7 +1295,6 @@ func buildRoleDetailsView(role rbacv1.Role) fyne.CanvasObject {
 	backButton := widget.NewButton(labelBackToList, func() { displayResourceList() })
 	return container.NewBorder(backButton, nil, nil, nil, container.NewVScroll(detailsVBox))
 }
-
 func buildRoleBindingDetailsView(rb rbacv1.RoleBinding) fyne.CanvasObject {
 	logDebug("Створення деталей для RoleBinding: %s/%s", rb.Namespace, rb.Name)
 	detailsVBox := container.NewVBox()
@@ -1259,7 +1307,6 @@ func buildRoleBindingDetailsView(rb rbacv1.RoleBinding) fyne.CanvasObject {
 	backButton := widget.NewButton(labelBackToList, func() { displayResourceList() })
 	return container.NewBorder(backButton, nil, nil, nil, container.NewVScroll(detailsVBox))
 }
-
 func buildClusterRoleDetailsView(cr rbacv1.ClusterRole) fyne.CanvasObject {
 	logDebug("Створення деталей для ClusterRole: %s", cr.Name)
 	detailsVBox := container.NewVBox()
@@ -1269,7 +1316,6 @@ func buildClusterRoleDetailsView(cr rbacv1.ClusterRole) fyne.CanvasObject {
 	backButton := widget.NewButton(labelBackToList, func() { displayResourceList() })
 	return container.NewBorder(backButton, nil, nil, nil, container.NewVScroll(detailsVBox))
 }
-
 func buildClusterRoleBindingDetailsView(crb rbacv1.ClusterRoleBinding) fyne.CanvasObject {
 	logDebug("Створення деталей для ClusterRoleBinding: %s", crb.Name)
 	detailsVBox := container.NewVBox()
@@ -1281,8 +1327,76 @@ func buildClusterRoleBindingDetailsView(crb rbacv1.ClusterRoleBinding) fyne.Canv
 	backButton := widget.NewButton(labelBackToList, func() { displayResourceList() })
 	return container.NewBorder(backButton, nil, nil, nil, container.NewVScroll(detailsVBox))
 }
-
-// Заглушка для нереалізованих типів
+func buildPersistentVolumeDetailsView(pv corev1.PersistentVolume) fyne.CanvasObject {
+	logDebug("Створення деталей для PersistentVolume: %s", pv.Name)
+	detailsVBox := container.NewVBox()
+	detailsVBox.Add(createDetailRow("Name", pv.Name))
+	detailsVBox.Add(createDetailRow("Created", pv.CreationTimestamp.Format(time.RFC1123)))
+	detailsVBox.Add(createDetailRow("Capacity", pv.Spec.Capacity.Storage().String()))
+	accessModes := make([]string, len(pv.Spec.AccessModes))
+	for i, mode := range pv.Spec.AccessModes {
+		accessModes[i] = string(mode)
+	}
+	detailsVBox.Add(createDetailRow("Access Modes", strings.Join(accessModes, ", ")))
+	detailsVBox.Add(createDetailRow("Reclaim Policy", string(pv.Spec.PersistentVolumeReclaimPolicy)))
+	if pv.Spec.StorageClassName != "" {
+		detailsVBox.Add(createDetailRow("Storage Class", pv.Spec.StorageClassName))
+	} else {
+		detailsVBox.Add(createDetailRow("Storage Class", "<none>"))
+	}
+	if pv.Spec.ClaimRef != nil {
+		detailsVBox.Add(createDetailRow("Claim", fmt.Sprintf("%s/%s", pv.Spec.ClaimRef.Namespace, pv.Spec.ClaimRef.Name)))
+	} else {
+		detailsVBox.Add(createDetailRow("Claim", "<none>"))
+	}
+	// TODO: Додати більше полів
+	backButton := widget.NewButton(labelBackToList, func() { displayResourceList() })
+	return container.NewBorder(backButton, nil, nil, nil, container.NewVScroll(detailsVBox))
+}
+func buildPersistentVolumeClaimDetailsView(pvc corev1.PersistentVolumeClaim) fyne.CanvasObject {
+	logDebug("Створення деталей для PersistentVolumeClaim: %s/%s", pvc.Namespace, pvc.Name)
+	detailsVBox := container.NewVBox()
+	detailsVBox.Add(createDetailRow("Name", pvc.Name))
+	detailsVBox.Add(createDetailRow("Namespace", pvc.Namespace))
+	detailsVBox.Add(createDetailRow("Created", pvc.CreationTimestamp.Format(time.RFC1123)))
+	detailsVBox.Add(createDetailRow("Status", string(pvc.Status.Phase)))
+	detailsVBox.Add(createDetailRow("Capacity", pvc.Status.Capacity.Storage().String()))
+	accessModes := make([]string, len(pvc.Status.AccessModes))
+	for i, mode := range pvc.Status.AccessModes {
+		accessModes[i] = string(mode)
+	}
+	detailsVBox.Add(createDetailRow("Access Modes", strings.Join(accessModes, ", ")))
+	if pvc.Spec.StorageClassName != nil {
+		detailsVBox.Add(createDetailRow("Storage Class", *pvc.Spec.StorageClassName))
+	} else {
+		detailsVBox.Add(createDetailRow("Storage Class", "<none>"))
+	}
+	if pvc.Spec.VolumeName != "" {
+		detailsVBox.Add(createDetailRow("Volume", pvc.Spec.VolumeName))
+	} else {
+		detailsVBox.Add(createDetailRow("Volume", "<none>"))
+	}
+	// TODO: Додати більше полів
+	backButton := widget.NewButton(labelBackToList, func() { displayResourceList() })
+	return container.NewBorder(backButton, nil, nil, nil, container.NewVScroll(detailsVBox))
+}
+func buildStorageClassDetailsView(sc storagev1.StorageClass) fyne.CanvasObject {
+	logDebug("Створення деталей для StorageClass: %s", sc.Name)
+	detailsVBox := container.NewVBox()
+	detailsVBox.Add(createDetailRow("Name", sc.Name))
+	detailsVBox.Add(createDetailRow("Provisioner", sc.Provisioner))
+	detailsVBox.Add(createDetailRow("Reclaim Policy", string(*sc.ReclaimPolicy)))
+	if len(sc.MountOptions) > 0 {
+		detailsVBox.Add(createDetailRow("Mount Options", strings.Join(sc.MountOptions, ", ")))
+	} else {
+		detailsVBox.Add(createDetailRow("Mount Options", "<none>"))
+	}
+	bindingMode := string(*sc.VolumeBindingMode)
+	detailsVBox.Add(createDetailRow("Volume Binding Mode", bindingMode))
+	// TODO: Додати більше полів (параметри)
+	backButton := widget.NewButton(labelBackToList, func() { displayResourceList() })
+	return container.NewBorder(backButton, nil, nil, nil, container.NewVScroll(detailsVBox))
+}
 func buildNotImplementedDetailsView(resourceType, resourceName string) fyne.CanvasObject {
 	logDebug("Створення заглушки для деталей: %s %s", resourceType, resourceName)
 	detailsVBox := container.NewVBox()
@@ -1302,9 +1416,6 @@ func buildErrorDetailsView(resourceType, resourceName string, err error) fyne.Ca
 	backButton := widget.NewButton(labelBackToList, func() { displayResourceList() })
 	return container.NewBorder(backButton, nil, nil, nil, container.NewPadded(detailsVBox))
 }
-
-// --- Допоміжні функції ---
-// (initializeLoadingRules, openKubeFolder без змін)
 func initializeLoadingRules() {
 	stateMu.Lock()
 	defer stateMu.Unlock()
@@ -1348,9 +1459,6 @@ func openKubeFolder() {
 		logError("Не вдалося відкрити '%s': %v", dir, err)
 	}
 }
-
-// --- Створення меню Fyne ---
-// (buildContextMenu, showWindowContextMenu без змін)
 func buildContextMenu() *fyne.Menu {
 	logDebug("Побудова меню Fyne...")
 	stateMu.RLock()
@@ -1403,8 +1511,6 @@ func showWindowContextMenu(pos fyne.Position) {
 	}
 }
 
-// --- Допоміжний тип для обробки правого кліку на контейнері ---
-// (Без змін)
 type tappableContainer struct {
 	widget.BaseWidget
 	content fyne.CanvasObject
@@ -1564,6 +1670,12 @@ func main() {
 				return len(currentClusterRoles)
 			case "ClusterRoleBindings": // Додано
 				return len(currentClusterRoleBindings)
+			case "PersistentVolumes": // Додано
+				return len(currentPersistentVolumes)
+			case "PersistentVolumeClaims": // Додано
+				return len(currentPersistentVolumeClaims)
+			case "StorageClasses": // Додано
+				return len(currentStorageClasses)
 			default:
 				return 0
 			}
@@ -1651,6 +1763,18 @@ func main() {
 			case "ClusterRoleBindings": // Додано
 				if id >= 0 && id < len(currentClusterRoleBindings) {
 					name = currentClusterRoleBindings[id].Name
+				}
+			case "PersistentVolumes": // Додано
+				if id >= 0 && id < len(currentPersistentVolumes) {
+					name = currentPersistentVolumes[id].Name
+				}
+			case "PersistentVolumeClaims": // Додано
+				if id >= 0 && id < len(currentPersistentVolumeClaims) {
+					name = fmt.Sprintf("%s/%s", currentPersistentVolumeClaims[id].Namespace, currentPersistentVolumeClaims[id].Name)
+				}
+			case "StorageClasses": // Додано
+				if id >= 0 && id < len(currentStorageClasses) {
+					name = currentStorageClasses[id].Name
 				}
 			}
 			stateMu.RUnlock()
@@ -1754,6 +1878,21 @@ func main() {
 			if id >= 0 && id < len(currentClusterRoleBindings) {
 				obj = currentClusterRoleBindings[id]
 				resourceName = currentClusterRoleBindings[id].Name
+			}
+		case "PersistentVolumes": // Додано
+			if id >= 0 && id < len(currentPersistentVolumes) {
+				obj = currentPersistentVolumes[id]
+				resourceName = currentPersistentVolumes[id].Name
+			}
+		case "PersistentVolumeClaims": // Додано
+			if id >= 0 && id < len(currentPersistentVolumeClaims) {
+				obj = currentPersistentVolumeClaims[id]
+				resourceName = currentPersistentVolumeClaims[id].Name
+			}
+		case "StorageClasses": // Додано
+			if id >= 0 && id < len(currentStorageClasses) {
+				obj = currentStorageClasses[id]
+				resourceName = currentStorageClasses[id].Name
 			}
 		default:
 			logWarning("Вибрано ресурс невідомого типу '%s' для деталей", resType)
@@ -1859,6 +1998,15 @@ func displayResourceDetails(resType string, resource interface{}) {
 		resourceName = data.Name
 	case rbacv1.ClusterRoleBinding: // Додано
 		detailWidget = buildClusterRoleBindingDetailsView(data)
+		resourceName = data.Name
+	case corev1.PersistentVolume: // Додано
+		detailWidget = buildPersistentVolumeDetailsView(data)
+		resourceName = data.Name
+	case corev1.PersistentVolumeClaim: // Додано
+		detailWidget = buildPersistentVolumeClaimDetailsView(data)
+		resourceName = data.Name
+	case storagev1.StorageClass: // Додано
+		detailWidget = buildStorageClassDetailsView(data)
 		resourceName = data.Name
 	default:
 		logWarning("Немає функції деталей для типу %T", resource)
