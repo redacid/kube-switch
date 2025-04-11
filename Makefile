@@ -33,6 +33,9 @@ git-publish:
 go-mod-tidy:
 	go mod tidy
 
+go-build:
+	go build ./...
+
 go-run:
 	go run ./
 

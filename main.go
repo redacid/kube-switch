@@ -31,6 +31,7 @@ import (
 	batchv1 "k8s.io/api/batch/v1"
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1" // Додано для Ingress
+	rbacv1 "k8s.io/api/rbac/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
@@ -90,12 +91,17 @@ var (
 	currentSecrets      []corev1.Secret
 	currentServices     []corev1.Service       // Додано
 	currentIngresses    []networkingv1.Ingress // Додано
-
-	kubeconfigFile     string
-	isKubeconfigEnvSet bool
-	loadingRules       clientcmd.ClientConfigLoadingRules
-	currentClientset   *kubernetes.Clientset
-	stateMu            sync.RWMutex
+	// Access Control
+	currentServiceAccounts     []corev1.ServiceAccount
+	currentRoles               []rbacv1.Role
+	currentRoleBindings        []rbacv1.RoleBinding
+	currentClusterRoles        []rbacv1.ClusterRole
+	currentClusterRoleBindings []rbacv1.ClusterRoleBinding
+	kubeconfigFile             string
+	isKubeconfigEnvSet         bool
+	loadingRules               clientcmd.ClientConfigLoadingRules
+	currentClientset           *kubernetes.Clientset
+	stateMu                    sync.RWMutex
 )
 
 func logDebug(format string, v ...interface{}) {
@@ -272,6 +278,12 @@ func updateUIWidgets() {
 	secretCount := len(currentSecrets)
 	svcCount := len(currentServices)
 	ingCount := len(currentIngresses)
+	// Access Control Counts
+	saCount := len(currentServiceAccounts)
+	roleCount := len(currentRoles)
+	roleBindingCount := len(currentRoleBindings)
+	clusterRoleCount := len(currentClusterRoles)
+	clusterRoleBindingCount := len(currentClusterRoleBindings)
 	stateMu.RUnlock()
 
 	displayCtxFromFile := labelNoContext
@@ -340,6 +352,16 @@ func updateUIWidgets() {
 			resourceCount = svcCount // Додано
 		case "Ingresses":
 			resourceCount = ingCount // Додано
+		case "ServiceAccounts": // Додано
+			resourceCount = saCount
+		case "Roles": // Додано
+			resourceCount = roleCount
+		case "RoleBindings": // Додано
+			resourceCount = roleBindingCount
+		case "ClusterRoles": // Додано
+			resourceCount = clusterRoleCount
+		case "ClusterRoleBindings": // Додано
+			resourceCount = clusterRoleBindingCount
 		// Додайте інші типи тут...
 		default:
 			resourceCount = 0
@@ -469,6 +491,11 @@ func loadSelectedResources() {
 	newSecrets := []corev1.Secret{}
 	newServices := []corev1.Service{}
 	newIngresses := []networkingv1.Ingress{}
+	newServiceAccounts := []corev1.ServiceAccount{}         // Додано
+	newRoles := []rbacv1.Role{}                             // Додано
+	newRoleBindings := []rbacv1.RoleBinding{}               // Додано
+	newClusterRoles := []rbacv1.ClusterRole{}               // Додано
+	newClusterRoleBindings := []rbacv1.ClusterRoleBinding{} // Додано
 
 	listOptions := metav1.ListOptions{}
 	ctxTimeout, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -620,6 +647,56 @@ func loadSelectedResources() {
 			newIngresses = list.Items
 			sort.Slice(newIngresses, func(i, j int) bool { return newIngresses[i].Name < newIngresses[j].Name })
 		}
+	case "ServiceAccounts": // Додано
+		logWarning("ЗАВАНТАЖЕННЯ ВСІХ SERVICEACCOUNTS!")
+		list, listErr := clientset.CoreV1().ServiceAccounts("").List(ctxTimeout, listOptions)
+		if listErr != nil {
+			err = listErr
+		} else {
+			logDebug("OK: %d ServiceAccounts", len(list.Items))
+			newServiceAccounts = list.Items
+			sort.Slice(newServiceAccounts, func(i, j int) bool { return newServiceAccounts[i].Name < newServiceAccounts[j].Name })
+		}
+	case "Roles": // Додано
+		logWarning("ЗАВАНТАЖЕННЯ ВСІХ ROLES!")
+		list, listErr := clientset.RbacV1().Roles("").List(ctxTimeout, listOptions)
+		if listErr != nil {
+			err = listErr
+		} else {
+			logDebug("OK: %d Roles", len(list.Items))
+			newRoles = list.Items
+			sort.Slice(newRoles, func(i, j int) bool { return newRoles[i].Name < newRoles[j].Name })
+		}
+	case "RoleBindings": // Додано
+		logWarning("ЗАВАНТАЖЕННЯ ВСІХ ROLEBINDINGS!")
+		list, listErr := clientset.RbacV1().RoleBindings("").List(ctxTimeout, listOptions)
+		if listErr != nil {
+			err = listErr
+		} else {
+			logDebug("OK: %d RoleBindings", len(list.Items))
+			newRoleBindings = list.Items
+			sort.Slice(newRoleBindings, func(i, j int) bool { return newRoleBindings[i].Name < newRoleBindings[j].Name })
+		}
+	case "ClusterRoles": // Додано
+		logWarning("ЗАВАНТАЖЕННЯ ВСІХ CLUSTERROLES!")
+		list, listErr := clientset.RbacV1().ClusterRoles().List(ctxTimeout, listOptions)
+		if listErr != nil {
+			err = listErr
+		} else {
+			logDebug("OK: %d ClusterRoles", len(list.Items))
+			newClusterRoles = list.Items
+			sort.Slice(newClusterRoles, func(i, j int) bool { return newClusterRoles[i].Name < newClusterRoles[j].Name })
+		}
+	case "ClusterRoleBindings": // Додано
+		logWarning("ЗАВАНТАЖЕННЯ ВСІХ CLUSTERROLEBINDINGS!")
+		list, listErr := clientset.RbacV1().ClusterRoleBindings().List(ctxTimeout, listOptions)
+		if listErr != nil {
+			err = listErr
+		} else {
+			logDebug("OK: %d ClusterRoleBindings", len(list.Items))
+			newClusterRoleBindings = list.Items
+			sort.Slice(newClusterRoleBindings, func(i, j int) bool { return newClusterRoleBindings[i].Name < newClusterRoleBindings[j].Name })
+		}
 	default:
 		logWarning("Невідомий тип ресурсу: %s", resType)
 		err = fmt.Errorf("тип %s не підтримується", resType)
@@ -659,6 +736,16 @@ func loadSelectedResources() {
 		currentServices = newServices // Додано
 	case "Ingresses":
 		currentIngresses = newIngresses // Додано
+	case "ServiceAccounts": // Додано
+		currentServiceAccounts = newServiceAccounts
+	case "Roles": // Додано
+		currentRoles = newRoles
+	case "RoleBindings": // Додано
+		currentRoleBindings = newRoleBindings
+	case "ClusterRoles": // Додано
+		currentClusterRoles = newClusterRoles
+	case "ClusterRoleBindings": // Додано
+		currentClusterRoleBindings = newClusterRoleBindings
 	}
 	stateMu.Unlock()
 
@@ -1138,6 +1225,63 @@ func buildIngressDetailsView(ing networkingv1.Ingress) fyne.CanvasObject {
 	return container.NewBorder(backButton, nil, nil, nil, container.NewVScroll(detailsVBox))
 }
 
+func buildServiceAccountDetailsView(sa corev1.ServiceAccount) fyne.CanvasObject {
+	logDebug("Створення деталей для ServiceAccount: %s/%s", sa.Namespace, sa.Name)
+	detailsVBox := container.NewVBox()
+	detailsVBox.Add(createDetailRow("Name", sa.Name))
+	detailsVBox.Add(createDetailRow("Namespace", sa.Namespace))
+	detailsVBox.Add(createDetailRow("Created", sa.CreationTimestamp.Format(time.RFC1123)))
+	// TODO: Додати більше полів
+	backButton := widget.NewButton(labelBackToList, func() { displayResourceList() })
+	return container.NewBorder(backButton, nil, nil, nil, container.NewVScroll(detailsVBox))
+}
+
+func buildRoleDetailsView(role rbacv1.Role) fyne.CanvasObject {
+	logDebug("Створення деталей для Role: %s/%s", role.Namespace, role.Name)
+	detailsVBox := container.NewVBox()
+	detailsVBox.Add(createDetailRow("Name", role.Name))
+	detailsVBox.Add(createDetailRow("Namespace", role.Namespace))
+	detailsVBox.Add(createDetailRow("Created", role.CreationTimestamp.Format(time.RFC1123)))
+	// TODO: Додати більше полів (правила)
+	backButton := widget.NewButton(labelBackToList, func() { displayResourceList() })
+	return container.NewBorder(backButton, nil, nil, nil, container.NewVScroll(detailsVBox))
+}
+
+func buildRoleBindingDetailsView(rb rbacv1.RoleBinding) fyne.CanvasObject {
+	logDebug("Створення деталей для RoleBinding: %s/%s", rb.Namespace, rb.Name)
+	detailsVBox := container.NewVBox()
+	detailsVBox.Add(createDetailRow("Name", rb.Name))
+	detailsVBox.Add(createDetailRow("Namespace", rb.Namespace))
+	detailsVBox.Add(createDetailRow("Created", rb.CreationTimestamp.Format(time.RFC1123)))
+	detailsVBox.Add(createDetailRow("Role Kind", rb.RoleRef.Kind))
+	detailsVBox.Add(createDetailRow("Role Name", rb.RoleRef.Name))
+	// TODO: Додати більше полів (суб'єкти)
+	backButton := widget.NewButton(labelBackToList, func() { displayResourceList() })
+	return container.NewBorder(backButton, nil, nil, nil, container.NewVScroll(detailsVBox))
+}
+
+func buildClusterRoleDetailsView(cr rbacv1.ClusterRole) fyne.CanvasObject {
+	logDebug("Створення деталей для ClusterRole: %s", cr.Name)
+	detailsVBox := container.NewVBox()
+	detailsVBox.Add(createDetailRow("Name", cr.Name))
+	detailsVBox.Add(createDetailRow("Created", cr.CreationTimestamp.Format(time.RFC1123)))
+	// TODO: Додати більше полів (правила)
+	backButton := widget.NewButton(labelBackToList, func() { displayResourceList() })
+	return container.NewBorder(backButton, nil, nil, nil, container.NewVScroll(detailsVBox))
+}
+
+func buildClusterRoleBindingDetailsView(crb rbacv1.ClusterRoleBinding) fyne.CanvasObject {
+	logDebug("Створення деталей для ClusterRoleBinding: %s", crb.Name)
+	detailsVBox := container.NewVBox()
+	detailsVBox.Add(createDetailRow("Name", crb.Name))
+	detailsVBox.Add(createDetailRow("Created", crb.CreationTimestamp.Format(time.RFC1123)))
+	detailsVBox.Add(createDetailRow("Role Kind", crb.RoleRef.Kind))
+	detailsVBox.Add(createDetailRow("Role Name", crb.RoleRef.Name))
+	// TODO: Додати більше полів (суб'єкти)
+	backButton := widget.NewButton(labelBackToList, func() { displayResourceList() })
+	return container.NewBorder(backButton, nil, nil, nil, container.NewVScroll(detailsVBox))
+}
+
 // Заглушка для нереалізованих типів
 func buildNotImplementedDetailsView(resourceType, resourceName string) fyne.CanvasObject {
 	logDebug("Створення заглушки для деталей: %s %s", resourceType, resourceName)
@@ -1410,6 +1554,16 @@ func main() {
 				return len(currentServices)
 			case "Ingresses":
 				return len(currentIngresses)
+			case "ServiceAccounts": // Додано
+				return len(currentServiceAccounts)
+			case "Roles": // Додано
+				return len(currentRoles)
+			case "RoleBindings": // Додано
+				return len(currentRoleBindings)
+			case "ClusterRoles": // Додано
+				return len(currentClusterRoles)
+			case "ClusterRoleBindings": // Додано
+				return len(currentClusterRoleBindings)
 			default:
 				return 0
 			}
@@ -1471,6 +1625,32 @@ func main() {
 			case "Ingresses":
 				if id >= 0 && id < len(currentIngresses) {
 					name = fmt.Sprintf("%s/%s", currentIngresses[id].Namespace, currentIngresses[id].Name)
+				}
+			case "ServiceAccounts": // Додано
+				if id >= 0 && id < len(currentServiceAccounts) {
+					name = fmt.Sprintf("%s/%s", currentServiceAccounts[id].Namespace, currentServiceAccounts[id].Name)
+					if currentServiceAccounts[id].Namespace == "" {
+						name = currentServiceAccounts[id].Name
+					}
+				}
+			case "Roles": // Додано
+				if id >= 0 && id < len(currentRoles) {
+					name = fmt.Sprintf("%s/%s", currentRoles[id].Namespace, currentRoles[id].Name)
+					if currentRoles[id].Namespace == "" {
+						name = currentRoles[id].Name
+					}
+				}
+			case "RoleBindings": // Додано
+				if id >= 0 && id < len(currentRoleBindings) {
+					name = fmt.Sprintf("%s/%s", currentRoleBindings[id].Namespace, currentRoleBindings[id].Name)
+				}
+			case "ClusterRoles": // Додано
+				if id >= 0 && id < len(currentClusterRoles) {
+					name = currentClusterRoles[id].Name
+				}
+			case "ClusterRoleBindings": // Додано
+				if id >= 0 && id < len(currentClusterRoleBindings) {
+					name = currentClusterRoleBindings[id].Name
 				}
 			}
 			stateMu.RUnlock()
@@ -1550,6 +1730,31 @@ func main() {
 				obj = currentIngresses[id]
 				resourceName = currentIngresses[id].Name
 			} // Додано
+		case "ServiceAccounts": // Додано
+			if id >= 0 && id < len(currentServiceAccounts) {
+				obj = currentServiceAccounts[id]
+				resourceName = currentServiceAccounts[id].Name
+			}
+		case "Roles": // Додано
+			if id >= 0 && id < len(currentRoles) {
+				obj = currentRoles[id]
+				resourceName = currentRoles[id].Name
+			}
+		case "RoleBindings": // Додано
+			if id >= 0 && id < len(currentRoleBindings) {
+				obj = currentRoleBindings[id]
+				resourceName = currentRoleBindings[id].Name
+			}
+		case "ClusterRoles": // Додано
+			if id >= 0 && id < len(currentClusterRoles) {
+				obj = currentClusterRoles[id]
+				resourceName = currentClusterRoles[id].Name
+			}
+		case "ClusterRoleBindings": // Додано
+			if id >= 0 && id < len(currentClusterRoleBindings) {
+				obj = currentClusterRoleBindings[id]
+				resourceName = currentClusterRoleBindings[id].Name
+			}
 		default:
 			logWarning("Вибрано ресурс невідомого типу '%s' для деталей", resType)
 		}
@@ -1640,6 +1845,21 @@ func displayResourceDetails(resType string, resource interface{}) {
 	case networkingv1.Ingress:
 		detailWidget = buildIngressDetailsView(data)
 		resourceName = data.Name // Додано
+	case corev1.ServiceAccount: // Додано
+		detailWidget = buildServiceAccountDetailsView(data)
+		resourceName = data.Name
+	case rbacv1.Role: // Додано
+		detailWidget = buildRoleDetailsView(data)
+		resourceName = data.Name
+	case rbacv1.RoleBinding: // Додано
+		detailWidget = buildRoleBindingDetailsView(data)
+		resourceName = data.Name
+	case rbacv1.ClusterRole: // Додано
+		detailWidget = buildClusterRoleDetailsView(data)
+		resourceName = data.Name
+	case rbacv1.ClusterRoleBinding: // Додано
+		detailWidget = buildClusterRoleBindingDetailsView(data)
+		resourceName = data.Name
 	default:
 		logWarning("Немає функції деталей для типу %T", resource)
 		detailWidget = buildNotImplementedDetailsView(resType, resourceName)
