@@ -1,9 +1,9 @@
 package main
 
 import (
-	// "context"
-	// "embed" // Тимчасово видалено для діагностики
-	//"errors"
+	"context"
+	// "embed"
+	// "errors"
 	"fmt"
 	"log"
 	"os"
@@ -22,46 +22,51 @@ import (
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
 	"fyne.io/fyne/v2/container"
-	// "fyne.io/fyne/v2/driver/desktop" // Поки не використовуємо
-	// "fyne.io/fyne/v2/layout"
+	"fyne.io/fyne/v2/driver/desktop"
 	"fyne.io/fyne/v2/widget"
 
-	// Kubernetes client-go
-	// metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	// Kubernetes client-go & API types
+	corev1 "k8s.io/api/core/v1" // Додано для типу Node
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/tools/clientcmd/api"
 	// _ "k8s.io/client-go/plugin/pkg/client/auth"
 )
 
-// //go:embed icon.png // Тимчасово видалено
-// var iconData []byte // Тимчасово видалено
+// //go:embed icon.png
+// var iconData []byte
 
 const enableDebugLogging = true
-const logPrefix = "GoKubeLens(Step2-NoTrayDebug)"
+const logPrefix = "GoKubeLens(Step4-Details)" // Оновлено префікс
 const maxContextItems = 50
 
 const labelLoading = "Завантаження..."
 const labelError = "Помилка"
 const labelNoContext = "Немає контексту"
-const appTitle = "Go Kube Manager (Lens Clone) - Step 2 (No Tray)"
+const labelBackToList = "<- Назад до списку Вузлів" // Змінено текст кнопки
+const appTitle = "Go Kube Manager (Lens Clone) - Step 4"
 
 var arnRegex = regexp.MustCompile(`^arn:aws:eks:[^:]+:(\d+):cluster\/(.+)$`)
 
 var (
-	fyneApp             fyne.App
-	mainWindow          fyne.Window
+	fyneApp    fyne.App
+	mainWindow fyne.Window
+	// UI елементи
 	currentContextLabel *widget.Label
 	contextListWidget   *widget.List
-	centerInfoLabel     *widget.Label
+	resourceListWidget  *widget.List    // Список ресурсів (вузлів)
+	resourceDetailArea  *fyne.Container // Контейнер для деталей (форма + кнопка Назад)
+	rightPanelContainer *fyne.Container // Контейнер для перемикання (список/деталі) - тип *fyne.Container
 	statusBar           *widget.Label
-	// desktopApp          desktop.App // Тимчасово видалено
-	// trayMenu            *fyne.Menu // Тимчасово видалено
+	desktopApp          desktop.App
+	trayMenu            *fyne.Menu
 
-	currentContextName string
-	// selectedContextName  string
+	// Стан програми
+	currentContextName   string
 	connectedContextName string
 	allContextNames      []string
+	currentNodes         []corev1.Node // Зберігаємо повні об'єкти вузлів
 	kubeconfigFile       string
 	isKubeconfigEnvSet   bool
 	loadingRules         clientcmd.ClientConfigLoadingRules
@@ -222,6 +227,7 @@ func updateUIWidgets() {
 	ctxFromFile := currentContextName
 	connCtx := connectedContextName
 	ctxList := allContextNames
+	nodes := currentNodes
 	statusMsg := ""
 	if statusBar != nil {
 		statusMsg = statusBar.Text
@@ -231,11 +237,10 @@ func updateUIWidgets() {
 	if ctxFromFile != "" {
 		displayCtxFromFile = getDisplayName(ctxFromFile)
 	}
-	logDebug("Поточний контекст з файлу для UI: %s", displayCtxFromFile)
 	if currentContextLabel != nil {
 		currentContextLabel.SetText("Поточний у файлі: " + displayCtxFromFile)
 	}
-	logDebug("Оновлення списку контекстів у UI (%d)", len(ctxList))
+
 	if contextListWidget != nil {
 		contextListWidget.Refresh()
 		targetSelection := connCtx
@@ -255,14 +260,20 @@ func updateUIWidgets() {
 			contextListWidget.UnselectAll()
 		}
 	}
-	// updateSystemTrayMenu() // Тимчасово видалено
-	if statusBar != nil && !strings.HasPrefix(statusMsg, "Помилка") {
-		statusBar.SetText(fmt.Sprintf("Контекстів: %d", len(ctxList)))
+
+	if resourceListWidget != nil {
+		logDebug("Оновлення списку ресурсів у UI (%d вузлів)", len(nodes))
+		resourceListWidget.Refresh()
+	}
+	// Оновлення деталей НЕ ПОТРІБНЕ тут, воно відбувається при виклику displayNodeDetails
+
+	// updateSystemTrayMenu() // Трей вимкнено
+
+	if statusBar != nil && !strings.HasPrefix(statusMsg, "Помилка") && !strings.HasPrefix(statusMsg, "Підключення") {
+		statusBar.SetText(fmt.Sprintf("Контекстів: %d | Вузлів: %d", len(ctxList), len(nodes)))
 	}
 	logDebug("Оновлення UI віджетів завершено.")
 }
-
-// func updateSystemTrayMenu() { ... } // Тимчасово видалено
 
 // --- Завантаження даних, оновлення стану та ВИКЛИК оновлення UI ---
 func loadAndUpdateState() {
@@ -280,12 +291,15 @@ func loadAndUpdateState() {
 		logError("Не вдалося отримати список контекстів: %v", errCtxList)
 		ctxList = []string{}
 	}
+
 	stateMu.Lock()
 	currentContextName = ctxFromFile
 	allContextNames = ctxList
 	connectedContextName = ""
 	currentClientset = nil
+	currentNodes = []corev1.Node{}
 	stateMu.Unlock()
+
 	var statusMsg string
 	if errCtxFile != nil && errCtxList != nil {
 		statusMsg = fmt.Sprintf("Помилка конт. та списку!")
@@ -299,36 +313,167 @@ func loadAndUpdateState() {
 	if statusBar != nil {
 		statusBar.SetText(statusMsg)
 	}
-	if centerInfoLabel != nil {
-		centerInfoLabel.SetText("Виберіть контекст для підключення.")
-	}
+
+	displayNodeList() // Показуємо список ресурсів (порожній)
+
 	logDebug("Виклик оновлення UI віджетів після завантаження")
 	updateUIWidgets()
 	logInfo("Завантаження та оновлення стану завершено.")
 }
 
-// Обгортка для підключення та оновлення UI
-func connectAndRefresh(ctxName string) {
-	clientset, versionString, err := connectToCluster(ctxName)
+// --- Завантаження ресурсів та оновлення UI ---
+func loadResourcesAndUpdateUI(clientset *kubernetes.Clientset, contextName string) {
+	if clientset == nil {
+		logWarning("Спроба завантажити ресурси без clientset.")
+		displayNodeList()
+		updateUIWidgets()
+		return
+	} // Додано показ списку та оновлення UI
+	logInfo("Завантаження ресурсів для контексту: %s", contextName)
+	if statusBar != nil {
+		statusBar.SetText(fmt.Sprintf("Завантаження вузлів для '%s'...", getDisplayName(contextName)))
+	}
+
+	nodes, err := clientset.CoreV1().Nodes().List(context.TODO(), metav1.ListOptions{})
+	loadedNodes := []corev1.Node{}
+	statusMsg := ""
+
+	if err != nil {
+		logError("Не вдалося отримати список вузлів для '%s': %v", contextName, err)
+		statusMsg = fmt.Sprintf("Помилка завантаження вузлів: %v", err)
+	} else {
+		logDebug("Отримано %d вузлів.", len(nodes.Items))
+		loadedNodes = nodes.Items
+		sort.Slice(loadedNodes, func(i, j int) bool { return loadedNodes[i].Name < loadedNodes[j].Name })
+		statusMsg = fmt.Sprintf("Підключено: %s | Вузлів: %d", getDisplayName(contextName), len(loadedNodes))
+	}
+
+	stateMu.Lock()
+	currentNodes = loadedNodes
+	stateMu.Unlock()
+	if statusBar != nil {
+		statusBar.SetText(statusMsg)
+	}
+
+	displayNodeList() // Показуємо оновлений список вузлів
+	updateUIWidgets()
+	logInfo("Завантаження та оновлення ресурсів завершено.")
+}
+
+// Обгортка для підключення, завантаження ресурсів та оновлення UI
+func connectLoadAndRefresh(ctxName string) {
+	displayNodeList() // Одразу показуємо (можливо порожній) список вузлів
+	if resourceListWidget != nil {
+		resourceListWidget.Refresh()
+	} // Оновлюємо його
+
+	clientset, _, err := connectToCluster(ctxName)
+
 	stateMu.Lock()
 	if err == nil {
 		connectedContextName = ctxName
 		currentClientset = clientset
+		currentNodes = []corev1.Node{}
 		logDebug("Збережено clientset: %s", ctxName)
 		stateMu.Unlock()
-		if centerInfoLabel != nil {
-			centerInfoLabel.SetText(fmt.Sprintf("Підключено до: %s\nВерсія сервера: %s\n\n(Наступний крок: показати ресурси...)", getDisplayName(ctxName), versionString))
-		}
-		updateUIWidgets()
+		go loadResourcesAndUpdateUI(clientset, ctxName)
 	} else {
 		connectedContextName = ""
 		currentClientset = nil
+		currentNodes = []corev1.Node{}
 		logDebug("Помилка підключення.")
 		stateMu.Unlock()
-		if centerInfoLabel != nil {
-			centerInfoLabel.SetText(fmt.Sprintf("Не вдалося підключитися до: %s\n\nПомилка: %v", getDisplayName(ctxName), err))
-		}
+		displayNodeList()
 		updateUIWidgets()
+	}
+}
+
+// --- Функції для перемикання вмісту правої панелі ---
+
+// Показує список вузлів у правій панелі
+func displayNodeList() {
+	logDebug("Показ списку вузлів")
+	if rightPanelContainer != nil && resourceListWidget != nil {
+		// Оновлюємо дані списку перед тим як його показати
+		resourceListWidget.Refresh()
+		if len(rightPanelContainer.Objects) == 0 || rightPanelContainer.Objects[0] != resourceListWidget {
+			rightPanelContainer.Objects = []fyne.CanvasObject{resourceListWidget}
+			rightPanelContainer.Refresh()
+		}
+	} else {
+		logError("rightPanelContainer або resourceListWidget є nil при показі списку")
+	}
+}
+
+// Показує деталі вузла у правій панелі
+func displayNodeDetails(node corev1.Node) {
+	logDebug("Показ деталей для вузла: %s", node.Name)
+	if rightPanelContainer != nil {
+		// Створюємо віджети для деталей
+		form := widget.NewForm()
+		form.Append("Name", widget.NewLabel(node.Name))
+		form.Append("Created", widget.NewLabel(node.CreationTimestamp.Format(time.RFC1123)))
+
+		statusItems := []string{}
+		for _, cond := range node.Status.Conditions {
+			if cond.Status == corev1.ConditionTrue {
+				statusItems = append(statusItems, string(cond.Type))
+			}
+		}
+		if len(statusItems) == 0 {
+			statusItems = append(statusItems, "Unknown")
+		}
+		form.Append("Status", widget.NewLabel(strings.Join(statusItems, ", ")))
+
+		roles := []string{}
+		for label := range node.Labels {
+			if strings.HasPrefix(label, "node-role.kubernetes.io/") {
+				roles = append(roles, strings.TrimPrefix(label, "node-role.kubernetes.io/"))
+			}
+		}
+		if len(roles) == 0 {
+			roles = append(roles, "<none>")
+		}
+		sort.Strings(roles)
+		form.Append("Roles", widget.NewLabel(strings.Join(roles, ", ")))
+
+		form.Append("Kubelet Version", widget.NewLabel(node.Status.NodeInfo.KubeletVersion))
+		form.Append("OS Image", widget.NewLabel(node.Status.NodeInfo.OSImage))
+		form.Append("Kernel Version", widget.NewLabel(node.Status.NodeInfo.KernelVersion))
+		form.Append("Container Runtime", widget.NewLabel(node.Status.NodeInfo.ContainerRuntimeVersion))
+
+		internalIP := ""
+		externalIP := ""
+		for _, addr := range node.Status.Addresses {
+			if addr.Type == corev1.NodeInternalIP {
+				internalIP = addr.Address
+			}
+			if addr.Type == corev1.NodeExternalIP {
+				externalIP = addr.Address
+			}
+		}
+		form.Append("Internal IP", widget.NewLabel(internalIP))
+		form.Append("External IP", widget.NewLabel(externalIP))
+
+		// --- Додамо ресурси (Capacity) ---
+		cpu := node.Status.Capacity[corev1.ResourceCPU]
+		mem := node.Status.Capacity[corev1.ResourceMemory]
+		pods := node.Status.Capacity[corev1.ResourcePods]
+		form.Append("CPU (Capacity)", widget.NewLabel(cpu.String()))
+		form.Append("Memory (Capacity)", widget.NewLabel(mem.String()))
+		form.Append("Pods (Capacity)", widget.NewLabel(pods.String()))
+
+		backButton := widget.NewButton(labelBackToList, func() { displayNodeList() })
+
+		// Створюємо контейнер для деталей з прокруткою
+		scrollableForm := container.NewVScroll(form)
+		detailView := container.NewBorder(backButton, nil, nil, nil, scrollableForm)
+
+		// Встановлюємо новий вміст у праву панель
+		rightPanelContainer.Objects = []fyne.CanvasObject{detailView}
+		rightPanelContainer.Refresh()
+	} else {
+		logError("rightPanelContainer є nil при показі деталей")
 	}
 }
 
@@ -386,7 +531,7 @@ func buildContextMenu() *fyne.Menu {
 	stateMu.RUnlock()
 	refreshItem := fyne.NewMenuItem("Оновити список", func() { logDebug("Клік 'Оновити'"); go loadAndUpdateState() })
 	openFolderItem := fyne.NewMenuItem("Відкрити папку конфігурації", func() { logDebug("Клік 'Відкрити папку'"); openKubeFolder() })
-	quitItem := fyne.NewMenuItem("Вийти", func() { logInfo("Клік 'Вийти'"); /*stopFileWatcher();*/ fyneApp.Quit() })
+	quitItem := fyne.NewMenuItem("Вийти", func() { logInfo("Клік 'Вийти'"); fyneApp.Quit() })
 	contextItems := []*fyne.MenuItem{}
 	allContexts, err := getContexts()
 	if err != nil {
@@ -410,7 +555,7 @@ func buildContextMenu() *fyne.Menu {
 			}
 			var action func()
 			if name != connCtx {
-				action = func() { go connectAndRefresh(name) }
+				action = func() { go connectLoadAndRefresh(name) }
 			} else {
 				action = nil
 			}
@@ -453,27 +598,15 @@ func main() {
 
 	initializeLoadingRules()
 	fyneApp = app.New()
-
-	// --- Тимчасово видалено налаштування трея ---
-	// resIconPng := fyne.NewStaticResource("icon.png", iconData)
-	// if len(iconData) == 0 { logWarning("Дані іконки для трея порожні!"); resIconPng = nil }
-	// if drv, ok := fyneApp.(desktop.App); ok {
-	//  desktopApp = drv
-	//  if resIconPng != nil { desktopApp.SetSystemTrayIcon(resIconPng)
-	//  } else { logWarning("Не вдалося встановити іконку трея.") }
-	//  trayMenu = buildContextMenu(); desktopApp.SetSystemTrayMenu(trayMenu); logInfo("Системний трей налаштовано.")
-	// } else { logInfo("Системний трей не підтримується.") }
-	// -------------------------------------------
-
 	mainWindow = fyneApp.NewWindow(appTitle)
+
+	// --- Створюємо UI елементи ---
 	currentContextLabel = widget.NewLabel(labelLoading)
 	statusBar = widget.NewLabel("Ініціалізація...")
-	centerInfoLabel = widget.NewLabel("Виберіть контекст зі списку зліва")
-	centerInfoLabel.Wrapping = fyne.TextWrapWord
-
+	// Список контекстів
 	contextListWidget = widget.NewList(
 		func() int { stateMu.RLock(); defer stateMu.RUnlock(); return len(allContextNames) },
-		func() fyne.CanvasObject { return widget.NewLabel("template context name") },
+		func() fyne.CanvasObject { return widget.NewLabel("template") },
 		func(id widget.ListItemID, item fyne.CanvasObject) {
 			stateMu.RLock()
 			name := ""
@@ -481,8 +614,7 @@ func main() {
 				name = allContextNames[id]
 			}
 			stateMu.RUnlock()
-			label := item.(*widget.Label)
-			label.SetText(getDisplayName(name))
+			item.(*widget.Label).SetText(getDisplayName(name))
 		},
 	)
 	contextListWidget.OnSelected = func(id widget.ListItemID) {
@@ -494,26 +626,60 @@ func main() {
 		stateMu.RUnlock()
 		if selectedName != "" {
 			logInfo("Вибрано контекст: %s", selectedName)
-			go connectAndRefresh(selectedName)
+			stateMu.RLock()
+			alreadyConnected := connectedContextName
+			stateMu.RUnlock()
+			if selectedName != alreadyConnected {
+				go connectLoadAndRefresh(selectedName)
+			}
+		}
+	}
+	// Список ресурсів (вузлів)
+	resourceListWidget = widget.NewList(
+		func() int { stateMu.RLock(); defer stateMu.RUnlock(); return len(currentNodes) }, // Використовуємо currentNodes
+		func() fyne.CanvasObject { return widget.NewLabel("template") },
+		func(id widget.ListItemID, item fyne.CanvasObject) {
+			stateMu.RLock()
+			nodeName := ""
+			if id >= 0 && id < len(currentNodes) {
+				nodeName = currentNodes[id].Name
+			}
+			stateMu.RUnlock()
+			item.(*widget.Label).SetText(nodeName)
+		}, // Показуємо ім'я вузла
+	)
+	resourceListWidget.OnSelected = func(id widget.ListItemID) {
+		stateMu.RLock()
+		var selectedNode *corev1.Node
+		if id >= 0 && id < len(currentNodes) {
+			nodeCopy := currentNodes[id]
+			selectedNode = &nodeCopy
+		}
+		stateMu.RUnlock() // Копіюємо, щоб уникнути гонки даних
+		if selectedNode != nil {
+			logInfo("Вибрано вузол: %s", selectedNode.Name)
+			displayNodeDetails(*selectedNode)
+		} else {
+			logWarning("Спроба вибрати неіснуючий вузол, ID: %d", id)
 		}
 	}
 
+	// --- Збираємо макет вікна ---
 	leftPanel := container.NewBorder(container.NewPadded(widget.NewLabel("Контексти:")), nil, nil, nil, contextListWidget)
-	rightPanelContent := container.NewPadded(centerInfoLabel)
-	tappableRightPanel := &tappableContainer{content: rightPanelContent}
+	// Права панель - це Max контейнер, що перемикається
+	rightPanelContainer = container.NewMax(resourceListWidget) // Починаємо зі списку ресурсів
+	tappableRightPanel := &tappableContainer{content: rightPanelContainer}
 	tappableRightPanel.ExtendBaseWidget(tappableRightPanel)
 	split := container.NewHSplit(leftPanel, tappableRightPanel)
 	split.Offset = 0.3
-
 	mainLayout := container.NewBorder(container.NewVBox(currentContextLabel, widget.NewSeparator()), statusBar, nil, nil, split)
 	mainWindow.SetContent(mainLayout)
 
 	mainWindow.Resize(fyne.NewSize(800, 600))
 	mainWindow.CenterOnScreen()
-	mainWindow.SetCloseIntercept(func() { logInfo("Закриття вікна..."); /*stopFileWatcher();*/ fyneApp.Quit() })
+	mainWindow.SetCloseIntercept(func() { logInfo("Закриття вікна..."); fyneApp.Quit() })
 
 	go loadAndUpdateState()
-
 	mainWindow.ShowAndRun()
 	logInfo(logPrefix + " завершено.")
 }
