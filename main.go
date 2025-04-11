@@ -2,7 +2,7 @@ package main
 
 import (
 	"context"
-	// "embed"
+	"embed" // Залишаємо імпорт
 	// "errors"
 	"fmt"
 	"log"
@@ -23,10 +23,13 @@ import (
 	"fyne.io/fyne/v2/app"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/driver/desktop"
+	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 
 	// Kubernetes client-go & API types
-	corev1 "k8s.io/api/core/v1" // Додано для типу Node
+	appsv1 "k8s.io/api/apps/v1"
+	batchv1 "k8s.io/api/batch/v1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
@@ -34,44 +37,63 @@ import (
 	// _ "k8s.io/client-go/plugin/pkg/client/auth"
 )
 
-// //go:embed icon.png
-// var iconData []byte
+//go:embed icon.png
+var iconData []byte
+
+// Хак для компілятора, щоб гарантовано "бачити" використання пакету embed
+var _ embed.FS // <--- ДОДАНО ХАК
+
+// --- Решта коду без змін ---
 
 const enableDebugLogging = true
-const logPrefix = "GoKubeLens(Step4-Details)" // Оновлено префікс
+const logPrefix = "GoKubeLens(Step6-EmbedHack)" // Оновлено префікс
 const maxContextItems = 50
 
 const labelLoading = "Завантаження..."
 const labelError = "Помилка"
 const labelNoContext = "Немає контексту"
-const labelBackToList = "<- Назад до списку Вузлів" // Змінено текст кнопки
-const appTitle = "Go Kube Manager (Lens Clone) - Step 4"
+const labelBackToList = "<- Назад до списку"
+const appTitle = "Go Kube Manager (Lens Clone) - Step 6"
+
+// Мапи для дерева ресурсів
+type resourceTreeNodeID = string
+
+var resourceTreeData = map[resourceTreeNodeID][]resourceTreeNodeID{"": {"Cluster", "Workloads", "Network", "Storage", "Configuration", "Access Control"}, "Cluster": {"Namespaces", "Nodes"}, "Workloads": {"Pods", "Deployments", "StatefulSets", "DaemonSets", "ReplicaSets", "Jobs", "CronJobs"}, "Network": {"Services", "Ingresses"}, "Storage": {"PersistentVolumes", "PersistentVolumeClaims", "StorageClasses"}, "Configuration": {"ConfigMaps", "Secrets"}, "Access Control": {"ServiceAccounts", "Roles", "RoleBindings", "ClusterRoles", "ClusterRoleBindings"}}
+var resourceLeafNodes = map[resourceTreeNodeID]bool{"Namespaces": true, "Nodes": true, "Pods": true, "Deployments": true, "StatefulSets": true, "DaemonSets": true, "ReplicaSets": true, "Jobs": true, "CronJobs": true, "Services": true, "Ingresses": true, "PersistentVolumes": true, "PersistentVolumeClaims": true, "StorageClasses": true, "ConfigMaps": true, "Secrets": true, "ServiceAccounts": true, "Roles": true, "RoleBindings": true, "ClusterRoles": true, "ClusterRoleBindings": true}
 
 var arnRegex = regexp.MustCompile(`^arn:aws:eks:[^:]+:(\d+):cluster\/(.+)$`)
 
 var (
-	fyneApp    fyne.App
-	mainWindow fyne.Window
-	// UI елементи
+	fyneApp             fyne.App
+	mainWindow          fyne.Window
 	currentContextLabel *widget.Label
 	contextListWidget   *widget.List
-	resourceListWidget  *widget.List    // Список ресурсів (вузлів)
-	resourceDetailArea  *fyne.Container // Контейнер для деталей (форма + кнопка Назад)
-	rightPanelContainer *fyne.Container // Контейнер для перемикання (список/деталі) - тип *fyne.Container
+	resourceTypeTree    *widget.Tree
+	resourceListWidget  *widget.List
+	rightPanelContainer *fyne.Container
 	statusBar           *widget.Label
 	desktopApp          desktop.App
 	trayMenu            *fyne.Menu
 
-	// Стан програми
 	currentContextName   string
 	connectedContextName string
 	allContextNames      []string
-	currentNodes         []corev1.Node // Зберігаємо повні об'єкти вузлів
-	kubeconfigFile       string
-	isKubeconfigEnvSet   bool
-	loadingRules         clientcmd.ClientConfigLoadingRules
-	currentClientset     *kubernetes.Clientset
-	stateMu              sync.RWMutex
+	selectedResourceType string
+	currentNodes         []corev1.Node
+	currentNamespaces    []corev1.Namespace
+	currentPods          []corev1.Pod
+	currentDeployments   []appsv1.Deployment
+	currentStatefulSets  []appsv1.StatefulSet
+	currentDaemonSets    []appsv1.DaemonSet
+	currentReplicaSets   []appsv1.ReplicaSet
+	currentJobs          []batchv1.Job
+	currentCronJobs      []batchv1.CronJob
+
+	kubeconfigFile     string
+	isKubeconfigEnvSet bool
+	loadingRules       clientcmd.ClientConfigLoadingRules
+	currentClientset   *kubernetes.Clientset
+	stateMu            sync.RWMutex
 )
 
 func logDebug(format string, v ...interface{}) {
@@ -227,11 +249,20 @@ func updateUIWidgets() {
 	ctxFromFile := currentContextName
 	connCtx := connectedContextName
 	ctxList := allContextNames
-	nodes := currentNodes
+	resType := selectedResourceType
 	statusMsg := ""
 	if statusBar != nil {
 		statusMsg = statusBar.Text
 	}
+	nodesCount := len(currentNodes)
+	nsCount := len(currentNamespaces)
+	podsCount := len(currentPods)
+	deployCount := len(currentDeployments)
+	stsCount := len(currentStatefulSets)
+	dsCount := len(currentDaemonSets)
+	rsCount := len(currentReplicaSets)
+	jobCount := len(currentJobs)
+	cronJobCount := len(currentCronJobs)
 	stateMu.RUnlock()
 	displayCtxFromFile := labelNoContext
 	if ctxFromFile != "" {
@@ -240,7 +271,6 @@ func updateUIWidgets() {
 	if currentContextLabel != nil {
 		currentContextLabel.SetText("Поточний у файлі: " + displayCtxFromFile)
 	}
-
 	if contextListWidget != nil {
 		contextListWidget.Refresh()
 		targetSelection := connCtx
@@ -260,17 +290,46 @@ func updateUIWidgets() {
 			contextListWidget.UnselectAll()
 		}
 	}
-
+	if resourceTypeTree != nil {
+		resourceTypeTree.Refresh()
+		if resType != "" {
+			resourceTypeTree.Select(resType)
+		} else {
+			resourceTypeTree.UnselectAll()
+		}
+	}
+	resourceCount := 0
 	if resourceListWidget != nil {
-		logDebug("Оновлення списку ресурсів у UI (%d вузлів)", len(nodes))
+		stateMu.RLock()
+		switch resType {
+		case "Namespaces":
+			resourceCount = nsCount
+		case "Nodes":
+			resourceCount = nodesCount
+		case "Pods":
+			resourceCount = podsCount
+		case "Deployments":
+			resourceCount = deployCount
+		case "StatefulSets":
+			resourceCount = stsCount
+		case "DaemonSets":
+			resourceCount = dsCount
+		case "ReplicaSets":
+			resourceCount = rsCount
+		case "Jobs":
+			resourceCount = jobCount
+		case "CronJobs":
+			resourceCount = cronJobCount
+		default:
+			resourceCount = 0
+		}
+		stateMu.RUnlock()
+		logDebug("Оновлення списку ресурсів '%s' у UI (%d елементів)", resType, resourceCount)
 		resourceListWidget.Refresh()
 	}
-	// Оновлення деталей НЕ ПОТРІБНЕ тут, воно відбувається при виклику displayNodeDetails
-
-	// updateSystemTrayMenu() // Трей вимкнено
-
-	if statusBar != nil && !strings.HasPrefix(statusMsg, "Помилка") && !strings.HasPrefix(statusMsg, "Підключення") {
-		statusBar.SetText(fmt.Sprintf("Контекстів: %d | Вузлів: %d", len(ctxList), len(nodes)))
+	//updateSystemTrayMenu()
+	if statusBar != nil && !strings.HasPrefix(statusMsg, "Помилка") && !strings.HasPrefix(statusMsg, "Підключення") && !strings.HasPrefix(statusMsg, "Завантаження") {
+		statusBar.SetText(fmt.Sprintf("Контекстів: %d | %s: %d", len(ctxList), resType, resourceCount))
 	}
 	logDebug("Оновлення UI віджетів завершено.")
 }
@@ -291,15 +350,22 @@ func loadAndUpdateState() {
 		logError("Не вдалося отримати список контекстів: %v", errCtxList)
 		ctxList = []string{}
 	}
-
 	stateMu.Lock()
 	currentContextName = ctxFromFile
 	allContextNames = ctxList
 	connectedContextName = ""
 	currentClientset = nil
-	currentNodes = []corev1.Node{}
+	currentNodes = nil
+	currentNamespaces = nil
+	currentPods = nil
+	currentDeployments = nil
+	currentStatefulSets = nil
+	currentDaemonSets = nil
+	currentReplicaSets = nil
+	currentJobs = nil
+	currentCronJobs = nil
+	selectedResourceType = "Nodes"
 	stateMu.Unlock()
-
 	var statusMsg string
 	if errCtxFile != nil && errCtxList != nil {
 		statusMsg = fmt.Sprintf("Помилка конт. та списку!")
@@ -313,88 +379,267 @@ func loadAndUpdateState() {
 	if statusBar != nil {
 		statusBar.SetText(statusMsg)
 	}
-
-	displayNodeList() // Показуємо список ресурсів (порожній)
-
+	displayResourceList()
 	logDebug("Виклик оновлення UI віджетів після завантаження")
 	updateUIWidgets()
 	logInfo("Завантаження та оновлення стану завершено.")
 }
 
-// --- Завантаження ресурсів та оновлення UI ---
-func loadResourcesAndUpdateUI(clientset *kubernetes.Clientset, contextName string) {
+// --- Завантаження вибраних ресурсів ---
+func loadSelectedResources() {
+	stateMu.RLock()
+	clientset := currentClientset
+	resType := selectedResourceType
+	contextName := connectedContextName
+	stateMu.RUnlock()
 	if clientset == nil {
 		logWarning("Спроба завантажити ресурси без clientset.")
-		displayNodeList()
+		if statusBar != nil {
+			statusBar.SetText("Не підключено.")
+		}
+		stateMu.Lock()
+		currentNodes = nil
+		currentNamespaces = nil
+		currentPods = nil
+		currentDeployments = nil
+		currentStatefulSets = nil
+		currentDaemonSets = nil
+		currentReplicaSets = nil
+		currentJobs = nil
+		currentCronJobs = nil
+		stateMu.Unlock()
+		displayResourceList()
 		updateUIWidgets()
 		return
-	} // Додано показ списку та оновлення UI
-	logInfo("Завантаження ресурсів для контексту: %s", contextName)
+	}
+	logInfo("Завантаження ресурсів типу '%s' для '%s'", resType, contextName)
 	if statusBar != nil {
-		statusBar.SetText(fmt.Sprintf("Завантаження вузлів для '%s'...", getDisplayName(contextName)))
+		statusBar.SetText(fmt.Sprintf("Завантаження %s для '%s'...", resType, getDisplayName(contextName)))
 	}
-
-	nodes, err := clientset.CoreV1().Nodes().List(context.TODO(), metav1.ListOptions{})
-	loadedNodes := []corev1.Node{}
-	statusMsg := ""
-
-	if err != nil {
-		logError("Не вдалося отримати список вузлів для '%s': %v", contextName, err)
-		statusMsg = fmt.Sprintf("Помилка завантаження вузлів: %v", err)
-	} else {
-		logDebug("Отримано %d вузлів.", len(nodes.Items))
-		loadedNodes = nodes.Items
-		sort.Slice(loadedNodes, func(i, j int) bool { return loadedNodes[i].Name < loadedNodes[j].Name })
-		statusMsg = fmt.Sprintf("Підключено: %s | Вузлів: %d", getDisplayName(contextName), len(loadedNodes))
-	}
-
+	var err error
+	var statusMsg string = "OK"
+	newNodes := []corev1.Node{}
+	newNamespaces := []corev1.Namespace{}
+	newPods := []corev1.Pod{}
+	newDeployments := []appsv1.Deployment{}
+	newStatefulSets := []appsv1.StatefulSet{}
+	newDaemonSets := []appsv1.DaemonSet{}
+	newReplicaSets := []appsv1.ReplicaSet{}
+	newJobs := []batchv1.Job{}
+	newCronJobs := []batchv1.CronJob{}
+	listOptions := metav1.ListOptions{}
+	ctxTimeout, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
 	stateMu.Lock()
-	currentNodes = loadedNodes
+	currentNodes = nil
+	currentNamespaces = nil
+	currentPods = nil
+	currentDeployments = nil
+	currentStatefulSets = nil
+	currentDaemonSets = nil
+	currentReplicaSets = nil
+	currentJobs = nil
+	currentCronJobs = nil
+	stateMu.Unlock()
+	switch resType {
+	case "Namespaces":
+		list, listErr := clientset.CoreV1().Namespaces().List(ctxTimeout, listOptions)
+		if listErr != nil {
+			err = listErr
+		} else {
+			logDebug("OK: %d Ns", len(list.Items))
+			newNamespaces = list.Items
+			sort.Slice(newNamespaces, func(i, j int) bool { return newNamespaces[i].Name < newNamespaces[j].Name })
+		}
+	case "Nodes":
+		list, listErr := clientset.CoreV1().Nodes().List(ctxTimeout, listOptions)
+		if listErr != nil {
+			err = listErr
+		} else {
+			logDebug("OK: %d Nodes", len(list.Items))
+			newNodes = list.Items
+			sort.Slice(newNodes, func(i, j int) bool { return newNodes[i].Name < newNodes[j].Name })
+		}
+	case "Pods":
+		logWarning("ЗАВАНТАЖЕННЯ ВСІХ PODS!")
+		list, listErr := clientset.CoreV1().Pods("").List(ctxTimeout, listOptions)
+		if listErr != nil {
+			err = listErr
+		} else {
+			logDebug("OK: %d Pods", len(list.Items))
+			newPods = list.Items
+			sort.Slice(newPods, func(i, j int) bool { return newPods[i].Name < newPods[j].Name })
+		}
+	case "Deployments":
+		logWarning("ЗАВАНТАЖЕННЯ ВСІХ DEPLOYMENTS!")
+		list, listErr := clientset.AppsV1().Deployments("").List(ctxTimeout, listOptions)
+		if listErr != nil {
+			err = listErr
+		} else {
+			logDebug("OK: %d Deploy", len(list.Items))
+			newDeployments = list.Items
+			sort.Slice(newDeployments, func(i, j int) bool { return newDeployments[i].Name < newDeployments[j].Name })
+		}
+	case "StatefulSets":
+		logWarning("ЗАВАНТАЖЕННЯ ВСІХ STATEFULSETS!")
+		list, listErr := clientset.AppsV1().StatefulSets("").List(ctxTimeout, listOptions)
+		if listErr != nil {
+			err = listErr
+		} else {
+			logDebug("OK: %d Sts", len(list.Items))
+			newStatefulSets = list.Items
+			sort.Slice(newStatefulSets, func(i, j int) bool { return newStatefulSets[i].Name < newStatefulSets[j].Name })
+		}
+	case "DaemonSets":
+		logWarning("ЗАВАНТАЖЕННЯ ВСІХ DAEMONSETS!")
+		list, listErr := clientset.AppsV1().DaemonSets("").List(ctxTimeout, listOptions)
+		if listErr != nil {
+			err = listErr
+		} else {
+			logDebug("OK: %d Ds", len(list.Items))
+			newDaemonSets = list.Items
+			sort.Slice(newDaemonSets, func(i, j int) bool { return newDaemonSets[i].Name < newDaemonSets[j].Name })
+		}
+	case "ReplicaSets":
+		logWarning("ЗАВАНТАЖЕННЯ ВСІХ REPLICASETS!")
+		list, listErr := clientset.AppsV1().ReplicaSets("").List(ctxTimeout, listOptions)
+		if listErr != nil {
+			err = listErr
+		} else {
+			logDebug("OK: %d Rs", len(list.Items))
+			newReplicaSets = list.Items
+			sort.Slice(newReplicaSets, func(i, j int) bool { return newReplicaSets[i].Name < newReplicaSets[j].Name })
+		}
+	case "Jobs":
+		logWarning("ЗАВАНТАЖЕННЯ ВСІХ JOBS!")
+		list, listErr := clientset.BatchV1().Jobs("").List(ctxTimeout, listOptions)
+		if listErr != nil {
+			err = listErr
+		} else {
+			logDebug("OK: %d Jobs", len(list.Items))
+			newJobs = list.Items
+			sort.Slice(newJobs, func(i, j int) bool { return newJobs[i].Name < newJobs[j].Name })
+		}
+	case "CronJobs":
+		logWarning("ЗАВАНТАЖЕННЯ ВСІХ CRONJOBS!")
+		list, listErr := clientset.BatchV1().CronJobs("").List(ctxTimeout, listOptions)
+		if listErr != nil {
+			err = listErr
+		} else {
+			logDebug("OK: %d Cj", len(list.Items))
+			newCronJobs = list.Items
+			sort.Slice(newCronJobs, func(i, j int) bool { return newCronJobs[i].Name < newCronJobs[j].Name })
+		}
+	default:
+		logWarning("Невідомий тип ресурсу: %s", resType)
+		err = fmt.Errorf("тип %s не підтримується", resType)
+	}
+	if err != nil {
+		logError("Помилка завантаження %s: %v", resType, err)
+		statusMsg = fmt.Sprintf("Помилка %s: %v", resType, err)
+	}
+	stateMu.Lock()
+	switch resType {
+	case "Namespaces":
+		currentNamespaces = newNamespaces
+	case "Nodes":
+		currentNodes = newNodes
+	case "Pods":
+		currentPods = newPods
+	case "Deployments":
+		currentDeployments = newDeployments
+	case "StatefulSets":
+		currentStatefulSets = newStatefulSets
+	case "DaemonSets":
+		currentDaemonSets = newDaemonSets
+	case "ReplicaSets":
+		currentReplicaSets = newReplicaSets
+	case "Jobs":
+		currentJobs = newJobs
+	case "CronJobs":
+		currentCronJobs = newCronJobs
+	}
 	stateMu.Unlock()
 	if statusBar != nil {
+		if err == nil {
+			count := 0
+			switch resType {
+			case "Namespaces":
+				count = len(newNamespaces)
+			case "Nodes":
+				count = len(newNodes)
+			case "Pods":
+				count = len(newPods)
+			case "Deployments":
+				count = len(newDeployments)
+			case "StatefulSets":
+				count = len(newStatefulSets)
+			case "DaemonSets":
+				count = len(newDaemonSets)
+			case "ReplicaSets":
+				count = len(newReplicaSets)
+			case "Jobs":
+				count = len(newJobs)
+			case "CronJobs":
+				count = len(newCronJobs)
+			}
+			statusMsg = fmt.Sprintf("Підключено: %s | %s: %d", getDisplayName(contextName), resType, count)
+		}
 		statusBar.SetText(statusMsg)
 	}
-
-	displayNodeList() // Показуємо оновлений список вузлів
+	displayResourceList()
 	updateUIWidgets()
-	logInfo("Завантаження та оновлення ресурсів завершено.")
+	logInfo("Завантаження '%s' завершено.", resType)
 }
 
-// Обгортка для підключення, завантаження ресурсів та оновлення UI
+// Обгортка для підключення та початкового завантаження ресурсів
 func connectLoadAndRefresh(ctxName string) {
-	displayNodeList() // Одразу показуємо (можливо порожній) список вузлів
+	displayResourceList()
 	if resourceListWidget != nil {
 		resourceListWidget.Refresh()
-	} // Оновлюємо його
-
+	}
 	clientset, _, err := connectToCluster(ctxName)
-
 	stateMu.Lock()
 	if err == nil {
 		connectedContextName = ctxName
 		currentClientset = clientset
-		currentNodes = []corev1.Node{}
-		logDebug("Збережено clientset: %s", ctxName)
+		selectedResourceType = "Nodes"
+		currentNodes = nil
+		currentNamespaces = nil
+		currentPods = nil
+		currentDeployments = nil
+		currentStatefulSets = nil
+		currentDaemonSets = nil
+		currentReplicaSets = nil
+		currentJobs = nil
+		currentCronJobs = nil
+		logDebug("Збережено clientset: %s, вибрано тип: %s", ctxName, selectedResourceType)
 		stateMu.Unlock()
-		go loadResourcesAndUpdateUI(clientset, ctxName)
+		go loadSelectedResources()
 	} else {
 		connectedContextName = ""
 		currentClientset = nil
-		currentNodes = []corev1.Node{}
+		selectedResourceType = ""
+		currentNodes = nil
+		currentNamespaces = nil
+		currentPods = nil
+		currentDeployments = nil
+		currentStatefulSets = nil
+		currentDaemonSets = nil
+		currentReplicaSets = nil
+		currentJobs = nil
+		currentCronJobs = nil
 		logDebug("Помилка підключення.")
 		stateMu.Unlock()
-		displayNodeList()
+		displayResourceList()
 		updateUIWidgets()
 	}
 }
 
 // --- Функції для перемикання вмісту правої панелі ---
-
-// Показує список вузлів у правій панелі
-func displayNodeList() {
-	logDebug("Показ списку вузлів")
+func displayResourceList() {
+	logDebug("Показ списку ресурсів")
 	if rightPanelContainer != nil && resourceListWidget != nil {
-		// Оновлюємо дані списку перед тим як його показати
 		resourceListWidget.Refresh()
 		if len(rightPanelContainer.Objects) == 0 || rightPanelContainer.Objects[0] != resourceListWidget {
 			rightPanelContainer.Objects = []fyne.CanvasObject{resourceListWidget}
@@ -405,26 +650,23 @@ func displayNodeList() {
 	}
 }
 
-// Показує деталі вузла у правій панелі
+// --- Функції для показу деталей ресурсів ---
 func displayNodeDetails(node corev1.Node) {
 	logDebug("Показ деталей для вузла: %s", node.Name)
 	if rightPanelContainer != nil {
-		// Створюємо віджети для деталей
 		form := widget.NewForm()
 		form.Append("Name", widget.NewLabel(node.Name))
 		form.Append("Created", widget.NewLabel(node.CreationTimestamp.Format(time.RFC1123)))
-
-		statusItems := []string{}
+		statusStr := ""
 		for _, cond := range node.Status.Conditions {
 			if cond.Status == corev1.ConditionTrue {
-				statusItems = append(statusItems, string(cond.Type))
+				statusStr += string(cond.Type) + " "
 			}
 		}
-		if len(statusItems) == 0 {
-			statusItems = append(statusItems, "Unknown")
+		if statusStr == "" {
+			statusStr = "Unknown"
 		}
-		form.Append("Status", widget.NewLabel(strings.Join(statusItems, ", ")))
-
+		form.Append("Status", widget.NewLabel(strings.TrimSpace(statusStr)))
 		roles := []string{}
 		for label := range node.Labels {
 			if strings.HasPrefix(label, "node-role.kubernetes.io/") {
@@ -436,12 +678,10 @@ func displayNodeDetails(node corev1.Node) {
 		}
 		sort.Strings(roles)
 		form.Append("Roles", widget.NewLabel(strings.Join(roles, ", ")))
-
 		form.Append("Kubelet Version", widget.NewLabel(node.Status.NodeInfo.KubeletVersion))
 		form.Append("OS Image", widget.NewLabel(node.Status.NodeInfo.OSImage))
 		form.Append("Kernel Version", widget.NewLabel(node.Status.NodeInfo.KernelVersion))
 		form.Append("Container Runtime", widget.NewLabel(node.Status.NodeInfo.ContainerRuntimeVersion))
-
 		internalIP := ""
 		externalIP := ""
 		for _, addr := range node.Status.Addresses {
@@ -454,27 +694,74 @@ func displayNodeDetails(node corev1.Node) {
 		}
 		form.Append("Internal IP", widget.NewLabel(internalIP))
 		form.Append("External IP", widget.NewLabel(externalIP))
-
-		// --- Додамо ресурси (Capacity) ---
 		cpu := node.Status.Capacity[corev1.ResourceCPU]
 		mem := node.Status.Capacity[corev1.ResourceMemory]
 		pods := node.Status.Capacity[corev1.ResourcePods]
 		form.Append("CPU (Capacity)", widget.NewLabel(cpu.String()))
 		form.Append("Memory (Capacity)", widget.NewLabel(mem.String()))
 		form.Append("Pods (Capacity)", widget.NewLabel(pods.String()))
-
-		backButton := widget.NewButton(labelBackToList, func() { displayNodeList() })
-
-		// Створюємо контейнер для деталей з прокруткою
-		scrollableForm := container.NewVScroll(form)
-		detailView := container.NewBorder(backButton, nil, nil, nil, scrollableForm)
-
-		// Встановлюємо новий вміст у праву панель
+		backButton := widget.NewButton(labelBackToList, func() { displayResourceList() })
+		detailView := container.NewBorder(backButton, nil, nil, nil, container.NewVScroll(form))
 		rightPanelContainer.Objects = []fyne.CanvasObject{detailView}
 		rightPanelContainer.Refresh()
 	} else {
-		logError("rightPanelContainer є nil при показі деталей")
+		logError("rightPanelContainer є nil при показі деталей Node")
 	}
+}
+func displayPodDetails(pod corev1.Pod) {
+	logDebug("Показ деталей для пода: %s/%s", pod.Namespace, pod.Name)
+	if rightPanelContainer != nil {
+		form := widget.NewForm()
+		form.Append("Name", widget.NewLabel(pod.Name))
+		form.Append("Namespace", widget.NewLabel(pod.Namespace))
+		form.Append("Created", widget.NewLabel(pod.CreationTimestamp.Format(time.RFC1123)))
+		form.Append("Status", widget.NewLabel(string(pod.Status.Phase)))
+		if pod.Status.Reason != "" {
+			form.Append("Reason", widget.NewLabel(pod.Status.Reason))
+		}
+		form.Append("Pod IP", widget.NewLabel(pod.Status.PodIP))
+		form.Append("Node", widget.NewLabel(pod.Spec.NodeName))
+		containerStatuses := []string{}
+		for _, cs := range pod.Status.ContainerStatuses {
+			status := fmt.Sprintf("%s (Restarts: %d, Ready: %v, Image: %s)", cs.Name, cs.RestartCount, cs.Ready, cs.Image)
+			containerStatuses = append(containerStatuses, status)
+		}
+		if len(containerStatuses) > 0 {
+			form.Append("Containers", widget.NewLabel(strings.Join(containerStatuses, "\n")))
+		}
+		owners := []string{}
+		for _, owner := range pod.OwnerReferences {
+			owners = append(owners, fmt.Sprintf("%s/%s", owner.Kind, owner.Name))
+		}
+		if len(owners) > 0 {
+			form.Append("Controlled By", widget.NewLabel(strings.Join(owners, ", ")))
+		}
+		backButton := widget.NewButton(labelBackToList, func() { displayResourceList() })
+		detailView := container.NewBorder(backButton, nil, nil, nil, container.NewVScroll(form))
+		rightPanelContainer.Objects = []fyne.CanvasObject{detailView}
+		rightPanelContainer.Refresh()
+	} else {
+		logError("rightPanelContainer є nil при показі деталей Pod")
+	}
+}
+func displayNotImplementedDetails(resourceType, resourceName string) {
+	logDebug("Показ заглушки для деталей: %s %s", resourceType, resourceName)
+	if rightPanelContainer != nil {
+		label := widget.NewLabel(fmt.Sprintf("Детальний вигляд для типу '%s' ('%s') ще не реалізовано.", resourceType, resourceName))
+		label.Wrapping = fyne.TextWrapWord
+		backButton := widget.NewButton(labelBackToList, func() { displayResourceList() })
+		detailView := container.NewBorder(backButton, nil, nil, nil, container.NewCenter(label))
+		rightPanelContainer.Objects = []fyne.CanvasObject{detailView}
+		rightPanelContainer.Refresh()
+	} else {
+		logError("rightPanelContainer є nil при показі заглушки деталей")
+	}
+}
+func buildErrorDetailsView(resourceType, resourceName string, err error) fyne.CanvasObject {
+	label := widget.NewLabel(fmt.Sprintf("Помилка завантаження деталей для %s '%s':\n%v", resourceType, resourceName, err))
+	label.Wrapping = fyne.TextWrapWord
+	backButton := widget.NewButton(labelBackToList, func() { displayResourceList() })
+	return container.NewBorder(backButton, nil, nil, nil, container.NewCenter(label))
 }
 
 // --- Допоміжні функції ---
@@ -599,12 +886,13 @@ func main() {
 	initializeLoadingRules()
 	fyneApp = app.New()
 	mainWindow = fyneApp.NewWindow(appTitle)
+	selectedResourceType = "Nodes"
 
 	// --- Створюємо UI елементи ---
 	currentContextLabel = widget.NewLabel(labelLoading)
 	statusBar = widget.NewLabel("Ініціалізація...")
-	// Список контекстів
-	contextListWidget = widget.NewList(
+
+	contextListWidget = widget.NewList( /* ... */
 		func() int { stateMu.RLock(); defer stateMu.RUnlock(); return len(allContextNames) },
 		func() fyne.CanvasObject { return widget.NewLabel("template") },
 		func(id widget.ListItemID, item fyne.CanvasObject) {
@@ -617,7 +905,7 @@ func main() {
 			item.(*widget.Label).SetText(getDisplayName(name))
 		},
 	)
-	contextListWidget.OnSelected = func(id widget.ListItemID) {
+	contextListWidget.OnSelected = func(id widget.ListItemID) { /* ... */
 		stateMu.RLock()
 		selectedName := ""
 		if id >= 0 && id < len(allContextNames) {
@@ -634,52 +922,247 @@ func main() {
 			}
 		}
 	}
-	// Список ресурсів (вузлів)
-	resourceListWidget = widget.NewList(
-		func() int { stateMu.RLock(); defer stateMu.RUnlock(); return len(currentNodes) }, // Використовуємо currentNodes
-		func() fyne.CanvasObject { return widget.NewLabel("template") },
+
+	resourceTypeTree = widget.NewTree( /* ... */
+		func(id widget.TreeNodeID) []widget.TreeNodeID {
+			children, _ := resourceTreeData[id]
+			sort.Strings(children)
+			return children
+		},
+		func(id widget.TreeNodeID) bool {
+			_, ok := resourceTreeData[id]
+			return (id == "" || ok && len(resourceTreeData[id]) > 0) && !resourceLeafNodes[id]
+		},
+		func(branch bool) fyne.CanvasObject {
+			if branch {
+				return container.NewHBox(widget.NewIcon(theme.FolderIcon()), widget.NewLabel("Template Group"))
+			}
+			return widget.NewLabel("Template Resource")
+		},
+		func(id widget.TreeNodeID, branch bool, node fyne.CanvasObject) {
+			if branch {
+				if cont, ok := node.(*fyne.Container); ok && len(cont.Objects) > 1 {
+					if lbl, ok2 := cont.Objects[1].(*widget.Label); ok2 {
+						lbl.SetText(id)
+					}
+				}
+			} else {
+				if lbl, ok := node.(*widget.Label); ok {
+					lbl.SetText(id)
+				}
+			}
+		},
+	)
+	resourceTypeTree.OnSelected = func(id widget.TreeNodeID) { /* ... */
+		logInfo("Вибрано вузол дерева ресурсів: %s", id)
+		if resourceLeafNodes[id] {
+			logInfo("Це листовий вузол - тип ресурсу: %s", id)
+			stateMu.Lock()
+			currentResType := selectedResourceType
+			stateMu.Unlock()
+			if id != currentResType {
+				stateMu.Lock()
+				selectedResourceType = id
+				stateMu.Unlock()
+				go loadSelectedResources()
+			}
+		} else {
+			logDebug("Вибрано групу '%s', розгортаємо/згортаємо.", id)
+			if resourceTypeTree.IsBranchOpen(id) {
+				resourceTypeTree.CloseBranch(id)
+			} else {
+				resourceTypeTree.OpenBranch(id)
+			}
+		}
+	}
+	resourceTypeTree.OpenBranch("Cluster")
+	resourceTypeTree.OpenBranch("Workloads")
+
+	resourceListWidget = widget.NewList( /* ... */
+		func() int {
+			stateMu.RLock()
+			defer stateMu.RUnlock()
+			switch selectedResourceType {
+			case "Namespaces":
+				return len(currentNamespaces)
+			case "Nodes":
+				return len(currentNodes)
+			case "Pods":
+				return len(currentPods)
+			case "Deployments":
+				return len(currentDeployments)
+			case "StatefulSets":
+				return len(currentStatefulSets)
+			case "DaemonSets":
+				return len(currentDaemonSets)
+			case "ReplicaSets":
+				return len(currentReplicaSets)
+			case "Jobs":
+				return len(currentJobs)
+			case "CronJobs":
+				return len(currentCronJobs)
+			default:
+				return 0
+			}
+		},
+		func() fyne.CanvasObject { return widget.NewLabel("template resource") },
 		func(id widget.ListItemID, item fyne.CanvasObject) {
 			stateMu.RLock()
-			nodeName := ""
-			if id >= 0 && id < len(currentNodes) {
-				nodeName = currentNodes[id].Name
+			name := ""
+			resType := selectedResourceType
+			switch resType {
+			case "Namespaces":
+				if id >= 0 && id < len(currentNamespaces) {
+					name = currentNamespaces[id].Name
+				}
+			case "Nodes":
+				if id >= 0 && id < len(currentNodes) {
+					name = currentNodes[id].Name
+				}
+			case "Pods":
+				if id >= 0 && id < len(currentPods) {
+					name = fmt.Sprintf("%s/%s", currentPods[id].Namespace, currentPods[id].Name)
+				}
+			case "Deployments":
+				if id >= 0 && id < len(currentDeployments) {
+					name = fmt.Sprintf("%s/%s", currentDeployments[id].Namespace, currentDeployments[id].Name)
+				}
+			case "StatefulSets":
+				if id >= 0 && id < len(currentStatefulSets) {
+					name = fmt.Sprintf("%s/%s", currentStatefulSets[id].Namespace, currentStatefulSets[id].Name)
+				}
+			case "DaemonSets":
+				if id >= 0 && id < len(currentDaemonSets) {
+					name = fmt.Sprintf("%s/%s", currentDaemonSets[id].Namespace, currentDaemonSets[id].Name)
+				}
+			case "ReplicaSets":
+				if id >= 0 && id < len(currentReplicaSets) {
+					name = fmt.Sprintf("%s/%s", currentReplicaSets[id].Namespace, currentReplicaSets[id].Name)
+				}
+			case "Jobs":
+				if id >= 0 && id < len(currentJobs) {
+					name = fmt.Sprintf("%s/%s", currentJobs[id].Namespace, currentJobs[id].Name)
+				}
+			case "CronJobs":
+				if id >= 0 && id < len(currentCronJobs) {
+					name = fmt.Sprintf("%s/%s", currentCronJobs[id].Namespace, currentCronJobs[id].Name)
+				}
 			}
 			stateMu.RUnlock()
-			item.(*widget.Label).SetText(nodeName)
-		}, // Показуємо ім'я вузла
+			item.(*widget.Label).SetText(name)
+		},
 	)
+	// Оновлений OnSelected для показу деталей
 	resourceListWidget.OnSelected = func(id widget.ListItemID) {
 		stateMu.RLock()
-		var selectedNode *corev1.Node
-		if id >= 0 && id < len(currentNodes) {
-			nodeCopy := currentNodes[id]
-			selectedNode = &nodeCopy
+		resType := selectedResourceType
+		var resourceName, resourceNamespace string
+		var node *corev1.Node
+		var pod *corev1.Pod
+		// Потрібно буде додати отримання об'єктів для інших типів тут
+		switch resType {
+		case "Namespaces":
+			if id >= 0 && id < len(currentNamespaces) {
+				resourceName = currentNamespaces[id].Name
+				resourceNamespace = ""
+			}
+		case "Nodes":
+			if id >= 0 && id < len(currentNodes) {
+				nodeCopy := currentNodes[id]
+				node = &nodeCopy
+				resourceName = node.Name
+				resourceNamespace = ""
+			}
+		case "Pods":
+			if id >= 0 && id < len(currentPods) {
+				podCopy := currentPods[id]
+				pod = &podCopy
+				resourceName = pod.Name
+				resourceNamespace = pod.Namespace
+			}
+		case "Deployments":
+			if id >= 0 && id < len(currentDeployments) {
+				resourceName = currentDeployments[id].Name
+				resourceNamespace = currentDeployments[id].Namespace
+			}
+		case "StatefulSets":
+			if id >= 0 && id < len(currentStatefulSets) {
+				resourceName = currentStatefulSets[id].Name
+				resourceNamespace = currentStatefulSets[id].Namespace
+			}
+		case "DaemonSets":
+			if id >= 0 && id < len(currentDaemonSets) {
+				resourceName = currentDaemonSets[id].Name
+				resourceNamespace = currentDaemonSets[id].Namespace
+			}
+		case "ReplicaSets":
+			if id >= 0 && id < len(currentReplicaSets) {
+				resourceName = currentReplicaSets[id].Name
+				resourceNamespace = currentReplicaSets[id].Namespace
+			}
+		case "Jobs":
+			if id >= 0 && id < len(currentJobs) {
+				resourceName = currentJobs[id].Name
+				resourceNamespace = currentJobs[id].Namespace
+			}
+		case "CronJobs":
+			if id >= 0 && id < len(currentCronJobs) {
+				resourceName = currentCronJobs[id].Name
+				resourceNamespace = currentCronJobs[id].Namespace
+			}
+		default:
+			logWarning("Вибрано ресурс невідомого типу '%s' для деталей", resType)
 		}
-		stateMu.RUnlock() // Копіюємо, щоб уникнути гонки даних
-		if selectedNode != nil {
-			logInfo("Вибрано вузол: %s", selectedNode.Name)
-			displayNodeDetails(*selectedNode)
+		stateMu.RUnlock()
+
+		if resourceName != "" {
+			fullName := resourceName
+			if resourceNamespace != "" {
+				fullName = resourceNamespace + "/" + fullName
+			}
+			logInfo("Вибрано ресурс '%s': %s", resType, fullName)
+			if statusBar != nil {
+				statusBar.SetText(fmt.Sprintf("Вибрано %s: %s", resType, fullName))
+			}
+			// Викликаємо відповідну функцію показу деталей
+			switch resType {
+			case "Nodes":
+				if node != nil {
+					displayNodeDetails(*node)
+				} else {
+					logError("Не вдалося отримати Node для деталей")
+				}
+			case "Pods":
+				if pod != nil {
+					displayPodDetails(*pod)
+				} else {
+					logError("Не вдалося отримати Pod для деталей")
+				}
+			default:
+				displayNotImplementedDetails(resType, resourceName) // Показуємо заглушку
+			}
 		} else {
-			logWarning("Спроба вибрати неіснуючий вузол, ID: %d", id)
+			logWarning("Не вдалося отримати ідентифікатор для вибраного ресурсу типу '%s', ID: %d", resType, id)
 		}
 	}
 
 	// --- Збираємо макет вікна ---
-	leftPanel := container.NewBorder(container.NewPadded(widget.NewLabel("Контексти:")), nil, nil, nil, contextListWidget)
-	// Права панель - це Max контейнер, що перемикається
+	leftPanelContent := container.NewVSplit(container.NewBorder(container.NewPadded(widget.NewLabel("Контексти:")), nil, nil, nil, contextListWidget), container.NewBorder(container.NewPadded(widget.NewLabel("Ресурси:")), nil, nil, nil, resourceTypeTree))
+	leftPanelContent.Offset = 0.5
+	// Виправлення 2: Ініціалізуємо rightPanelContainer як container.NewMax
 	rightPanelContainer = container.NewMax(resourceListWidget) // Починаємо зі списку ресурсів
 	tappableRightPanel := &tappableContainer{content: rightPanelContainer}
 	tappableRightPanel.ExtendBaseWidget(tappableRightPanel)
-	split := container.NewHSplit(leftPanel, tappableRightPanel)
+	split := container.NewHSplit(leftPanelContent, tappableRightPanel)
 	split.Offset = 0.3
 	mainLayout := container.NewBorder(container.NewVBox(currentContextLabel, widget.NewSeparator()), statusBar, nil, nil, split)
 	mainWindow.SetContent(mainLayout)
 
-	mainWindow.Resize(fyne.NewSize(800, 600))
+	mainWindow.Resize(fyne.NewSize(900, 700))
 	mainWindow.CenterOnScreen()
 	mainWindow.SetCloseIntercept(func() { logInfo("Закриття вікна..."); fyneApp.Quit() })
 
-	go loadAndUpdateState()
+	go loadAndUpdateState() // Викликаємо перейменовану/виправлену функцію
 	mainWindow.ShowAndRun()
 	logInfo(logPrefix + " завершено.")
 }
