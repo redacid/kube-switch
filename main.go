@@ -58,7 +58,7 @@ type resourceTreeNodeID = string
 var resourceTreeData = map[resourceTreeNodeID][]resourceTreeNodeID{"": {"Cluster", "Workloads", "Network", "Storage", "Configuration", "Access Control"}, "Cluster": {"Namespaces", "Nodes"}, "Workloads": {"Pods", "Deployments", "StatefulSets", "DaemonSets", "ReplicaSets", "Jobs", "CronJobs"}, "Network": {"Services", "Ingresses"}, "Storage": {"PersistentVolumes", "PersistentVolumeClaims", "StorageClasses"}, "Configuration": {"ConfigMaps", "Secrets"}, "Access Control": {"ServiceAccounts", "Roles", "RoleBindings", "ClusterRoles", "ClusterRoleBindings"}}
 var resourceLeafNodes = map[resourceTreeNodeID]bool{"Namespaces": true, "Nodes": true, "Pods": true, "Deployments": true, "StatefulSets": true, "DaemonSets": true, "ReplicaSets": true, "Jobs": true, "CronJobs": true, "Services": true, "Ingresses": true, "PersistentVolumes": true, "PersistentVolumeClaims": true, "StorageClasses": true, "ConfigMaps": true, "Secrets": true, "ServiceAccounts": true, "Roles": true, "RoleBindings": true, "ClusterRoles": true, "ClusterRoleBindings": true}
 
-var arnRegex = regexp.MustCompile(`^arn:aws:eks:[^:]+:(\d+):cluster\/(.+)$`)
+var arnRegex = regexp.MustCompile(`^arn:aws:eks:[^:]+:(\d+):cluster/(.+)$`)
 
 var (
 	fyneApp             fyne.App
