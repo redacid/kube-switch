@@ -3,7 +3,7 @@ package main
 import (
 	"context"
 	"embed"
-	// "errors"
+	//"errors"
 	"fmt"
 	"log"
 	"os"
@@ -42,7 +42,7 @@ var iconData []byte
 var _ embed.FS
 
 const enableDebugLogging = true
-const logPrefix = "GoKubeLens(Step6-DetailLayoutFix2)" // Оновлено префікс
+const logPrefix = "GoKubeLens(Step6-FixUndef)" // Оновлено префікс
 const maxContextItems = 50
 
 const labelLoading = "Завантаження..."
@@ -102,7 +102,6 @@ func logWarning(format string, v ...interface{}) { log.Printf(logPrefix+" [WARN]
 func logError(format string, v ...interface{})   { log.Printf(logPrefix+" [ERROR]: "+format, v...) }
 
 // --- Робота з Kubeconfig (clientcmd) ---
-// (Без змін)
 func loadKubeConfig() (*api.Config, string, error) {
 	stateMu.RLock()
 	rules := loadingRules
@@ -183,7 +182,6 @@ func switchContext(contextName string) error {
 }
 
 // --- Підключення до кластера ---
-// (Без змін)
 func connectToCluster(contextName string) (*kubernetes.Clientset, string, error) {
 	logInfo("Спроба підключення до: %s", contextName)
 	if statusBar != nil {
@@ -241,7 +239,6 @@ func getDisplayName(contextName string) string {
 }
 
 // --- Оновлення UI віджетів Fyne ---
-// (Без змін)
 func updateUIWidgets() {
 	logDebug("Оновлення UI віджетів (Fyne)...")
 	stateMu.RLock()
@@ -334,7 +331,6 @@ func updateUIWidgets() {
 }
 
 // --- Завантаження даних, оновлення стану та ВИКЛИК оновлення UI ---
-// (Без змін)
 func loadAndUpdateState() {
 	logInfo("Завантаження конфігурації та оновлення стану...")
 	if statusBar != nil {
@@ -386,7 +382,6 @@ func loadAndUpdateState() {
 }
 
 // --- Завантаження вибраних ресурсів ---
-// (Без змін)
 func loadSelectedResources() {
 	stateMu.RLock()
 	clientset := currentClientset
@@ -594,7 +589,6 @@ func loadSelectedResources() {
 }
 
 // Обгортка для підключення та початкового завантаження ресурсів
-// (Без змін)
 func connectLoadAndRefresh(ctxName string) {
 	displayResourceList()
 	if resourceListWidget != nil {
@@ -639,7 +633,6 @@ func connectLoadAndRefresh(ctxName string) {
 }
 
 // --- Функції для перемикання вмісту правої панелі ---
-// (Без змін)
 func displayResourceList() {
 	logDebug("Показ списку ресурсів")
 	if rightPanelContainer != nil && resourceListWidget != nil {
@@ -654,29 +647,17 @@ func displayResourceList() {
 }
 
 // --- Функції для показу деталей ресурсів ---
-
-// Допоміжна функція для створення рядка "Ключ: Значення" для деталей
 func createDetailRow(key string, value string) *fyne.Container {
 	keyLabel := widget.NewLabelWithStyle(key+":", fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
 	valueLabel := widget.NewLabel(value)
-	valueLabel.Wrapping = fyne.TextWrapWord // Завжди встановлюємо перенос
-	// Використовуємо Border для кращого контролю ширини значення
+	valueLabel.Wrapping = fyne.TextWrapWord
 	return container.NewBorder(nil, nil, keyLabel, nil, valueLabel)
 }
-
-// Виправлено displayNodeDetails з новим компонуванням рядків
-func displayNodeDetails(node corev1.Node) {
-	logDebug("Показ деталей для вузла: %s", node.Name)
-	if rightPanelContainer == nil {
-		logError("rightPanelContainer є nil...")
-		return
-	}
-
-	detailsVBox := container.NewVBox() // Головний контейнер для всіх рядків
-
+func buildNodeDetailsView(node corev1.Node) fyne.CanvasObject {
+	logDebug("Створення деталей для Node: %s", node.Name)
+	detailsVBox := container.NewVBox()
 	detailsVBox.Add(createDetailRow("Name", node.Name))
 	detailsVBox.Add(createDetailRow("Created", node.CreationTimestamp.Format(time.RFC1123)))
-
 	statusStr := ""
 	for _, cond := range node.Status.Conditions {
 		if cond.Status == corev1.ConditionTrue {
@@ -687,7 +668,6 @@ func displayNodeDetails(node corev1.Node) {
 		statusStr = "Unknown"
 	}
 	detailsVBox.Add(createDetailRow("Status", strings.TrimSpace(statusStr)))
-
 	roles := []string{}
 	for label := range node.Labels {
 		if strings.HasPrefix(label, "node-role.kubernetes.io/") {
@@ -699,16 +679,12 @@ func displayNodeDetails(node corev1.Node) {
 	}
 	sort.Strings(roles)
 	detailsVBox.Add(createDetailRow("Roles", strings.Join(roles, ", ")))
-
 	detailsVBox.Add(widget.NewSeparator())
-
 	detailsVBox.Add(createDetailRow("Kubelet Version", node.Status.NodeInfo.KubeletVersion))
 	detailsVBox.Add(createDetailRow("OS Image", node.Status.NodeInfo.OSImage))
 	detailsVBox.Add(createDetailRow("Kernel Version", node.Status.NodeInfo.KernelVersion))
 	detailsVBox.Add(createDetailRow("Container Runtime", node.Status.NodeInfo.ContainerRuntimeVersion))
-
 	detailsVBox.Add(widget.NewSeparator())
-
 	internalIP := ""
 	externalIP := ""
 	for _, addr := range node.Status.Addresses {
@@ -721,33 +697,19 @@ func displayNodeDetails(node corev1.Node) {
 	}
 	detailsVBox.Add(createDetailRow("Internal IP", internalIP))
 	detailsVBox.Add(createDetailRow("External IP", externalIP))
-
 	detailsVBox.Add(widget.NewSeparator())
-
 	cpu := node.Status.Capacity[corev1.ResourceCPU]
 	mem := node.Status.Capacity[corev1.ResourceMemory]
 	pods := node.Status.Capacity[corev1.ResourcePods]
 	detailsVBox.Add(createDetailRow("CPU (Capacity)", cpu.String()))
 	detailsVBox.Add(createDetailRow("Memory (Capacity)", mem.String()))
 	detailsVBox.Add(createDetailRow("Pods (Capacity)", pods.String()))
-
 	backButton := widget.NewButton(labelBackToList, func() { displayResourceList() })
-	detailView := container.NewBorder(backButton, nil, nil, nil, container.NewVScroll(detailsVBox))
-
-	rightPanelContainer.Objects = []fyne.CanvasObject{detailView}
-	rightPanelContainer.Refresh()
+	return container.NewBorder(backButton, nil, nil, nil, container.NewVScroll(detailsVBox))
 }
-
-// Виправлено displayPodDetails з новим компонуванням рядків
-func displayPodDetails(pod corev1.Pod) {
-	logDebug("Показ деталей для пода: %s/%s", pod.Namespace, pod.Name)
-	if rightPanelContainer == nil {
-		logError("rightPanelContainer є nil...")
-		return
-	}
-
+func buildPodDetailsView(pod corev1.Pod) fyne.CanvasObject {
+	logDebug("Створення деталей для Pod: %s/%s", pod.Namespace, pod.Name)
 	detailsVBox := container.NewVBox()
-
 	detailsVBox.Add(createDetailRow("Name", pod.Name))
 	detailsVBox.Add(createDetailRow("Namespace", pod.Namespace))
 	detailsVBox.Add(createDetailRow("Created", pod.CreationTimestamp.Format(time.RFC1123)))
@@ -757,7 +719,6 @@ func displayPodDetails(pod corev1.Pod) {
 	}
 	detailsVBox.Add(createDetailRow("Pod IP", pod.Status.PodIP))
 	detailsVBox.Add(createDetailRow("Node", pod.Spec.NodeName))
-
 	owners := []string{}
 	for _, owner := range pod.OwnerReferences {
 		owners = append(owners, fmt.Sprintf("%s/%s", owner.Kind, owner.Name))
@@ -765,60 +726,162 @@ func displayPodDetails(pod corev1.Pod) {
 	if len(owners) > 0 {
 		detailsVBox.Add(createDetailRow("Controlled By", strings.Join(owners, ", ")))
 	}
-
 	detailsVBox.Add(widget.NewSeparator())
 	detailsVBox.Add(widget.NewLabelWithStyle("Containers:", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}))
 	containerBox := container.NewVBox()
 	for _, cs := range pod.Status.ContainerStatuses {
-		// Форматуємо багаторядковий статус для кожного контейнера
-		status := fmt.Sprintf("Name: %s\n  Ready: %v\n  Restarts: %d\n  Image: %s", cs.Name, cs.Ready, cs.RestartCount, cs.Image)
+		status := fmt.Sprintf(" - %s (Restarts: %d, Ready: %v)\n   Image: %s", cs.Name, cs.RestartCount, cs.Ready, cs.Image)
 		contLabel := widget.NewLabel(status)
 		contLabel.Wrapping = fyne.TextWrapWord
 		containerBox.Add(contLabel)
-		containerBox.Add(widget.NewSeparator()) // Роздільник між контейнерами
+		containerBox.Add(widget.NewSeparator())
 	}
 	if len(pod.Status.ContainerStatuses) == 0 {
 		containerBox.Add(widget.NewLabel("  <none>"))
 	}
 	detailsVBox.Add(containerBox)
-
 	backButton := widget.NewButton(labelBackToList, func() { displayResourceList() })
-	detailView := container.NewBorder(backButton, nil, nil, nil, container.NewVScroll(detailsVBox))
-
-	rightPanelContainer.Objects = []fyne.CanvasObject{detailView}
-	rightPanelContainer.Refresh()
+	return container.NewBorder(backButton, nil, nil, nil, container.NewVScroll(detailsVBox))
+}
+func buildNamespaceDetailsView(ns corev1.Namespace) fyne.CanvasObject {
+	logDebug("Створення деталей для Namespace: %s", ns.Name)
+	detailsVBox := container.NewVBox()
+	detailsVBox.Add(createDetailRow("Name", ns.Name))
+	detailsVBox.Add(createDetailRow("Created", ns.CreationTimestamp.Format(time.RFC1123)))
+	detailsVBox.Add(createDetailRow("Status", string(ns.Status.Phase)))
+	if len(ns.Labels) > 0 {
+		detailsVBox.Add(widget.NewSeparator())
+		detailsVBox.Add(widget.NewLabelWithStyle("Labels:", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}))
+		keys := make([]string, 0, len(ns.Labels))
+		for k := range ns.Labels {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			detailsVBox.Add(createDetailRow("  "+k, ns.Labels[k]))
+		}
+	}
+	if len(ns.Annotations) > 0 {
+		detailsVBox.Add(widget.NewSeparator())
+		detailsVBox.Add(widget.NewLabelWithStyle("Annotations:", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}))
+		keys := make([]string, 0, len(ns.Annotations))
+		for k := range ns.Annotations {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			detailsVBox.Add(createDetailRow("  "+k, ns.Annotations[k]))
+		}
+	}
+	backButton := widget.NewButton(labelBackToList, func() { displayResourceList() })
+	return container.NewBorder(backButton, nil, nil, nil, container.NewVScroll(detailsVBox))
+}
+func buildDeploymentDetailsView(dep appsv1.Deployment) fyne.CanvasObject {
+	logDebug("Створення деталей для Deployment: %s/%s", dep.Namespace, dep.Name)
+	detailsVBox := container.NewVBox()
+	detailsVBox.Add(createDetailRow("Name", dep.Name))
+	detailsVBox.Add(createDetailRow("Namespace", dep.Namespace))
+	detailsVBox.Add(createDetailRow("Created", dep.CreationTimestamp.Format(time.RFC1123)))
+	detailsVBox.Add(createDetailRow("Replicas", fmt.Sprintf("%d desired, %d updated, %d total, %d available, %d unavailable", *dep.Spec.Replicas, dep.Status.UpdatedReplicas, dep.Status.Replicas, dep.Status.AvailableReplicas, dep.Status.UnavailableReplicas)))
+	detailsVBox.Add(createDetailRow("Strategy", string(dep.Spec.Strategy.Type)))
+	backButton := widget.NewButton(labelBackToList, func() { displayResourceList() })
+	return container.NewBorder(backButton, nil, nil, nil, container.NewVScroll(detailsVBox))
+}
+func buildStatefulSetDetailsView(sts appsv1.StatefulSet) fyne.CanvasObject {
+	logDebug("Створення деталей для StatefulSet: %s/%s", sts.Namespace, sts.Name)
+	detailsVBox := container.NewVBox()
+	detailsVBox.Add(createDetailRow("Name", sts.Name))
+	detailsVBox.Add(createDetailRow("Namespace", sts.Namespace))
+	detailsVBox.Add(createDetailRow("Created", sts.CreationTimestamp.Format(time.RFC1123)))
+	detailsVBox.Add(createDetailRow("Replicas", fmt.Sprintf("%d desired, %d current, %d ready", *sts.Spec.Replicas, sts.Status.CurrentReplicas, sts.Status.ReadyReplicas)))
+	detailsVBox.Add(createDetailRow("Service Name", sts.Spec.ServiceName))
+	backButton := widget.NewButton(labelBackToList, func() { displayResourceList() })
+	return container.NewBorder(backButton, nil, nil, nil, container.NewVScroll(detailsVBox))
+}
+func buildDaemonSetDetailsView(ds appsv1.DaemonSet) fyne.CanvasObject {
+	logDebug("Створення деталей для DaemonSet: %s/%s", ds.Namespace, ds.Name)
+	detailsVBox := container.NewVBox()
+	detailsVBox.Add(createDetailRow("Name", ds.Name))
+	detailsVBox.Add(createDetailRow("Namespace", ds.Namespace))
+	detailsVBox.Add(createDetailRow("Created", ds.CreationTimestamp.Format(time.RFC1123)))
+	detailsVBox.Add(createDetailRow("Pods", fmt.Sprintf("%d desired, %d current, %d ready, %d available, %d unavailable", ds.Status.DesiredNumberScheduled, ds.Status.CurrentNumberScheduled, ds.Status.NumberReady, ds.Status.NumberAvailable, ds.Status.NumberUnavailable)))
+	detailsVBox.Add(createDetailRow("Update Strategy", string(ds.Spec.UpdateStrategy.Type)))
+	backButton := widget.NewButton(labelBackToList, func() { displayResourceList() })
+	return container.NewBorder(backButton, nil, nil, nil, container.NewVScroll(detailsVBox))
+}
+func buildReplicaSetDetailsView(rs appsv1.ReplicaSet) fyne.CanvasObject {
+	logDebug("Створення деталей для ReplicaSet: %s/%s", rs.Namespace, rs.Name)
+	detailsVBox := container.NewVBox()
+	detailsVBox.Add(createDetailRow("Name", rs.Name))
+	detailsVBox.Add(createDetailRow("Namespace", rs.Namespace))
+	detailsVBox.Add(createDetailRow("Created", rs.CreationTimestamp.Format(time.RFC1123)))
+	detailsVBox.Add(createDetailRow("Replicas", fmt.Sprintf("%d desired, %d current, %d ready", *rs.Spec.Replicas, rs.Status.Replicas, rs.Status.ReadyReplicas)))
+	backButton := widget.NewButton(labelBackToList, func() { displayResourceList() })
+	return container.NewBorder(backButton, nil, nil, nil, container.NewVScroll(detailsVBox))
+}
+func buildJobDetailsView(job batchv1.Job) fyne.CanvasObject {
+	logDebug("Створення деталей для Job: %s/%s", job.Namespace, job.Name)
+	detailsVBox := container.NewVBox()
+	detailsVBox.Add(createDetailRow("Name", job.Name))
+	detailsVBox.Add(createDetailRow("Namespace", job.Namespace))
+	detailsVBox.Add(createDetailRow("Created", job.CreationTimestamp.Format(time.RFC1123)))
+	completions := "N/A"
+	if job.Spec.Completions != nil {
+		completions = fmt.Sprintf("%d", *job.Spec.Completions)
+	}
+	detailsVBox.Add(createDetailRow("Completions", completions))
+	parallelism := "N/A"
+	if job.Spec.Parallelism != nil {
+		parallelism = fmt.Sprintf("%d", *job.Spec.Parallelism)
+	}
+	detailsVBox.Add(createDetailRow("Parallelism", parallelism))
+	detailsVBox.Add(createDetailRow("Status", fmt.Sprintf("%d active, %d succeeded, %d failed", job.Status.Active, job.Status.Succeeded, job.Status.Failed)))
+	backButton := widget.NewButton(labelBackToList, func() { displayResourceList() })
+	return container.NewBorder(backButton, nil, nil, nil, container.NewVScroll(detailsVBox))
+}
+func buildCronJobDetailsView(cj batchv1.CronJob) fyne.CanvasObject {
+	logDebug("Створення деталей для CronJob: %s/%s", cj.Namespace, cj.Name)
+	detailsVBox := container.NewVBox()
+	detailsVBox.Add(createDetailRow("Name", cj.Name))
+	detailsVBox.Add(createDetailRow("Namespace", cj.Namespace))
+	detailsVBox.Add(createDetailRow("Created", cj.CreationTimestamp.Format(time.RFC1123)))
+	detailsVBox.Add(createDetailRow("Schedule", cj.Spec.Schedule))
+	suspend := "False"
+	if cj.Spec.Suspend != nil && *cj.Spec.Suspend {
+		suspend = "True"
+	}
+	detailsVBox.Add(createDetailRow("Suspend", suspend))
+	detailsVBox.Add(createDetailRow("Active Jobs", fmt.Sprintf("%d", len(cj.Status.Active))))
+	lastSchedule := "Never"
+	if cj.Status.LastScheduleTime != nil {
+		lastSchedule = cj.Status.LastScheduleTime.Format(time.RFC1123)
+	}
+	detailsVBox.Add(createDetailRow("Last Schedule", lastSchedule))
+	detailsVBox.Add(createDetailRow("Concurrency Policy", string(cj.Spec.ConcurrencyPolicy)))
+	backButton := widget.NewButton(labelBackToList, func() { displayResourceList() })
+	return container.NewBorder(backButton, nil, nil, nil, container.NewVScroll(detailsVBox))
 }
 
-// Виправлено displayNotImplementedDetails з новим компонуванням рядків
-func displayNotImplementedDetails(resourceType, resourceName string) {
-	logDebug("Показ заглушки для деталей: %s %s", resourceType, resourceName)
-	if rightPanelContainer == nil {
-		logError("rightPanelContainer є nil...")
-		return
-	}
-
+// Виправлено: Перейменовано функцію та змінено тип повернення
+func buildNotImplementedDetailsView(resourceType, resourceName string) fyne.CanvasObject {
+	logDebug("Створення заглушки для деталей: %s %s", resourceType, resourceName)
 	detailsVBox := container.NewVBox()
 	label := widget.NewLabel(fmt.Sprintf("Детальний вигляд для типу '%s' ('%s') ще не реалізовано.", resourceType, resourceName))
 	label.Wrapping = fyne.TextWrapWord
 	label.Alignment = fyne.TextAlignCenter
-	detailsVBox.Add(label) // Додаємо мітку у VBox
-
+	detailsVBox.Add(label)
 	backButton := widget.NewButton(labelBackToList, func() { displayResourceList() })
-	// Використовуємо Border: кнопка зверху, VBox (з міткою) - в центрі
-	detailView := container.NewBorder(backButton, nil, nil, nil, container.NewPadded(detailsVBox))
-
-	rightPanelContainer.Objects = []fyne.CanvasObject{detailView}
-	rightPanelContainer.Refresh()
+	// Використовуємо Border для консистентності
+	return container.NewBorder(backButton, nil, nil, nil, container.NewPadded(detailsVBox))
 }
 
-// Виправлено buildErrorDetailsView з новим компонуванням рядків
+// Виправлено: Перейменовано функцію та змінено тип повернення
 func buildErrorDetailsView(resourceType, resourceName string, err error) fyne.CanvasObject {
 	detailsVBox := container.NewVBox()
 	label := widget.NewLabel(fmt.Sprintf("Помилка завантаження деталей для %s '%s':\n%v", resourceType, resourceName, err))
 	label.Wrapping = fyne.TextWrapWord
 	label.Alignment = fyne.TextAlignCenter
 	detailsVBox.Add(label)
-
 	backButton := widget.NewButton(labelBackToList, func() { displayResourceList() })
 	return container.NewBorder(backButton, nil, nil, nil, container.NewPadded(detailsVBox))
 }
@@ -949,6 +1012,9 @@ func main() {
 	fyneApp = app.New()
 	mainWindow = fyneApp.NewWindow(appTitle)
 	selectedResourceType = "Nodes"
+
+	// --- Налаштування трея (закоментовано) ---
+	// ...
 
 	// --- Створюємо UI елементи ---
 	currentContextLabel = widget.NewLabel(labelLoading)
@@ -1114,102 +1180,96 @@ func main() {
 			item.(*widget.Label).SetText(name)
 		},
 	)
+	// Оновлено OnSelected для виклику ПРАВИЛЬНИХ функцій деталей
 	resourceListWidget.OnSelected = func(id widget.ListItemID) {
 		stateMu.RLock()
 		resType := selectedResourceType
-		var resourceName, resourceNamespace string
-		var node *corev1.Node
-		var pod *corev1.Pod
-		var namespace *corev1.Namespace
+		var detailWidget fyne.CanvasObject // Віджет, який буде показано
+		var resourceName string            // Для логування та заглушки
+
+		// Отримуємо об'єкт та викликаємо відповідну функцію побудови
 		switch resType {
 		case "Namespaces":
 			if id >= 0 && id < len(currentNamespaces) {
-				nsCopy := currentNamespaces[id]
-				namespace = &nsCopy
-				resourceName = namespace.Name
-				resourceNamespace = ""
+				obj := currentNamespaces[id]
+				resourceName = obj.Name
+				detailWidget = buildNamespaceDetailsView(obj)
 			}
 		case "Nodes":
 			if id >= 0 && id < len(currentNodes) {
-				nodeCopy := currentNodes[id]
-				node = &nodeCopy
-				resourceName = node.Name
-				resourceNamespace = ""
+				obj := currentNodes[id]
+				resourceName = obj.Name
+				detailWidget = buildNodeDetailsView(obj)
 			}
 		case "Pods":
 			if id >= 0 && id < len(currentPods) {
-				podCopy := currentPods[id]
-				pod = &podCopy
-				resourceName = pod.Name
-				resourceNamespace = pod.Namespace
+				obj := currentPods[id]
+				resourceName = obj.Name
+				detailWidget = buildPodDetailsView(obj)
 			}
 		case "Deployments":
 			if id >= 0 && id < len(currentDeployments) {
-				resourceName = currentDeployments[id].Name
-				resourceNamespace = currentDeployments[id].Namespace
+				obj := currentDeployments[id]
+				resourceName = obj.Name
+				detailWidget = buildDeploymentDetailsView(obj)
 			}
 		case "StatefulSets":
 			if id >= 0 && id < len(currentStatefulSets) {
-				resourceName = currentStatefulSets[id].Name
-				resourceNamespace = currentStatefulSets[id].Namespace
+				obj := currentStatefulSets[id]
+				resourceName = obj.Name
+				detailWidget = buildStatefulSetDetailsView(obj)
 			}
 		case "DaemonSets":
 			if id >= 0 && id < len(currentDaemonSets) {
-				resourceName = currentDaemonSets[id].Name
-				resourceNamespace = currentDaemonSets[id].Namespace
+				obj := currentDaemonSets[id]
+				resourceName = obj.Name
+				detailWidget = buildDaemonSetDetailsView(obj)
 			}
 		case "ReplicaSets":
 			if id >= 0 && id < len(currentReplicaSets) {
-				resourceName = currentReplicaSets[id].Name
-				resourceNamespace = currentReplicaSets[id].Namespace
+				obj := currentReplicaSets[id]
+				resourceName = obj.Name
+				detailWidget = buildReplicaSetDetailsView(obj)
 			}
 		case "Jobs":
 			if id >= 0 && id < len(currentJobs) {
-				resourceName = currentJobs[id].Name
-				resourceNamespace = currentJobs[id].Namespace
+				obj := currentJobs[id]
+				resourceName = obj.Name
+				detailWidget = buildJobDetailsView(obj)
 			}
 		case "CronJobs":
 			if id >= 0 && id < len(currentCronJobs) {
-				resourceName = currentCronJobs[id].Name
-				resourceNamespace = currentCronJobs[id].Namespace
+				obj := currentCronJobs[id]
+				resourceName = obj.Name
+				detailWidget = buildCronJobDetailsView(obj)
 			}
 		default:
 			logWarning("Вибрано ресурс невідомого типу '%s' для деталей", resType)
 		}
 		stateMu.RUnlock()
-		if resourceName != "" {
+
+		if detailWidget != nil { // Якщо віджет деталей створено
 			fullName := resourceName
-			if resourceNamespace != "" {
-				fullName = resourceNamespace + "/" + fullName
-			}
+			// Якщо потрібен неймспейс для логу/статусу, його треба отримати разом з об'єктом вище
+			// stateMu.RLock(); if ns != "" { fullName = ns + "/" + resourceName }; stateMu.RUnlock() // Приклад
 			logInfo("Вибрано ресурс '%s': %s", resType, fullName)
 			if statusBar != nil {
 				statusBar.SetText(fmt.Sprintf("Вибрано %s: %s", resType, fullName))
 			}
-			switch resType {
-			case "Nodes":
-				if node != nil {
-					displayNodeDetails(*node)
-				} else {
-					logError("Не вдалося отримати Node для деталей")
-				}
-			case "Pods":
-				if pod != nil {
-					displayPodDetails(*pod)
-				} else {
-					logError("Не вдалося отримати Pod для деталей")
-				}
-			case "Namespaces":
-				if namespace != nil {
-					displayNamespaceDetails(*namespace)
-				} else {
-					logError("Не вдалося отримати Namespace для деталей")
-				}
-			default:
-				displayNotImplementedDetails(resType, resourceName)
+			// Оновлюємо праву панель
+			if rightPanelContainer != nil {
+				rightPanelContainer.Objects = []fyne.CanvasObject{detailWidget}
+				rightPanelContainer.Refresh()
+			}
+		} else if resourceName != "" { // Якщо об'єкт не вдалося отримати, але ім'я є
+			logWarning("Не вдалося отримати об'єкт для '%s': %s", resType, resourceName)
+			detailWidget = buildNotImplementedDetailsView(resType, resourceName) // Показуємо заглушку
+			if rightPanelContainer != nil {
+				rightPanelContainer.Objects = []fyne.CanvasObject{detailWidget}
+				rightPanelContainer.Refresh()
 			}
 		} else {
-			logWarning("Не вдалося отримати ідентифікатор для вибраного ресурсу типу '%s', ID: %d", resType, id)
+			logWarning("Не вдалося отримати ідентифікатор/об'єкт для вибраного ресурсу типу '%s', ID: %d", resType, id)
 		}
 	}
 
@@ -1231,54 +1291,4 @@ func main() {
 	go loadAndUpdateState()
 	mainWindow.ShowAndRun()
 	logInfo(logPrefix + " завершено.")
-}
-
-// --- Додано функцію для деталей Namespace ---
-// Перероблено з новим компонуванням рядків
-func displayNamespaceDetails(ns corev1.Namespace) {
-	logDebug("Показ деталей для Namespace: %s", ns.Name)
-	if rightPanelContainer == nil {
-		logError("rightPanelContainer є nil...")
-		return
-	}
-
-	detailsVBox := container.NewVBox()
-
-	detailsVBox.Add(createDetailRow("Name", ns.Name))
-	detailsVBox.Add(createDetailRow("Created", ns.CreationTimestamp.Format(time.RFC1123)))
-	detailsVBox.Add(createDetailRow("Status", string(ns.Status.Phase)))
-
-	// Мітки (Labels)
-	if len(ns.Labels) > 0 {
-		detailsVBox.Add(widget.NewSeparator())
-		detailsVBox.Add(widget.NewLabelWithStyle("Labels:", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}))
-		keys := make([]string, 0, len(ns.Labels))
-		for k := range ns.Labels {
-			keys = append(keys, k)
-		}
-		sort.Strings(keys)
-		for _, k := range keys {
-			detailsVBox.Add(createDetailRow("  "+k, ns.Labels[k]))
-		} // Відступ для ключів міток
-	}
-
-	// Анотації (Annotations)
-	if len(ns.Annotations) > 0 {
-		detailsVBox.Add(widget.NewSeparator())
-		detailsVBox.Add(widget.NewLabelWithStyle("Annotations:", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}))
-		keys := make([]string, 0, len(ns.Annotations))
-		for k := range ns.Annotations {
-			keys = append(keys, k)
-		}
-		sort.Strings(keys)
-		for _, k := range keys {
-			detailsVBox.Add(createDetailRow("  "+k, ns.Annotations[k]))
-		} // Відступ для ключів анотацій
-	}
-
-	backButton := widget.NewButton(labelBackToList, func() { displayResourceList() })
-	detailView := container.NewBorder(backButton, nil, nil, nil, container.NewVScroll(detailsVBox))
-
-	rightPanelContainer.Objects = []fyne.CanvasObject{detailView}
-	rightPanelContainer.Refresh()
 }
