@@ -22,13 +22,13 @@ TARGET_MAX_CHAR_NUM = 30
 all: help
 
 ## Build and Publish
-git-publish:
-	make clean-workspace
-	make git-release
-	make fyne-cross-build-linux
-	make fyne-cross-build-windows
-	make git-upload-release
-	make clean-workspace
+#git-publish:
+#	make clean-workspace
+#	make git-release
+#	make fyne-cross-build-linux
+#	make fyne-cross-build-windows
+#	make git-upload-release
+#	make clean-workspace
 
 go-mod-tidy:
 	go mod tidy
@@ -42,62 +42,62 @@ go-build:
 go-run:
 	go run ./
 
-fyne-cross-build-linux: install_fyne_cross_cmd
-	fyne-cross linux -app-version $(RELEASE_VERSION) -arch amd64,386,arm,arm64 -icon $(ICON) -metadata Details.Version=$(RELEASE_VERSION) \
-		-name $(APP_NAME) -release -debug
-
-fyne-cross-build-windows: install_fyne_cross_cmd
-	fyne-cross windows -app-version $(RELEASE_VERSION) -arch amd64,386 -icon $(ICON) -metadata Details.Version=$(RELEASE_VERSION) \
-		-name $(APP_NAME) -debug
-
-.ONESHELL:
-clean-workspace:
-	rm *.tar.xz 2>/dev/null ;
-	rm -rf $(BUILD_DIR) 2>/dev/null;
-	rm -rf ./fyne-cross 2> /dev/null;
-	rm -rf ./dist 2>/dev/null;
-	rm -rf ./tmp-pkg 2>/dev/null;
-	rm fyne_metadata_init.go 2>/dev/null;
-
-install_linux_libs:
-	sudo apt install freeglut3-dev gcc libgl1-mesa-dev xorg-dev libxkbcommon-dev
-
-install_fyne_cmd:
-	go install fyne.io/fyne/v2/cmd/fyne@latest
-
-install_fyne_cross_cmd:
-	go install github.com/fyne-io/fyne-cross@latest
-
-git-release:
-	gh release delete $(RELEASE_VERSION) --cleanup-tag -y --repo $(PRJ_REPO) 2>/dev/null;
-	git tag -d $(RELEASE_VERSION) 2>/dev/null;
-	gh release create $(RELEASE_VERSION) --generate-notes --notes "$(RELEASE_VERSION)" --repo $(PRJ_REPO)
-
-.ONESHELL:
-git-upload-release:
-	$(eval BIN_DIRS := $(shell ls ./fyne-cross/bin/))
-	$(eval DIST_DIRS := $(shell ls ./fyne-cross/dist/))
-	@for bin in $(BIN_DIRS); do
-		if [[ $$bin == *"windows"* ]]; then
-			mv "./fyne-cross/bin/"$$bin"/"$(APP_NAME)".exe" "./fyne-cross/bin/"$$bin"/"$(APP_NAME)_$$bin".exe" 2>/dev/null
-			gh release upload $(RELEASE_VERSION) "./fyne-cross/bin/"$$bin"/"$(APP_NAME)_$$bin".exe" --repo $(PRJ_REPO)
-		else
-			mv "./fyne-cross/bin/"$$bin"/"$(APP_NAME) "./fyne-cross/bin/"$$bin"/"$(APP_NAME)_$$bin 2>/dev/null
-			gh release upload $(RELEASE_VERSION) "./fyne-cross/bin/"$$bin"/"$(APP_NAME)_$$bin --repo $(PRJ_REPO)
-		fi
-	done
-	@for dist in $(DIST_DIRS); do
-		if [[ $$dist == *"windows"* ]]; then
-			mv "./fyne-cross/dist/"$$dist"/"$(APP_NAME)".zip" "./fyne-cross/dist/"$$dist"/"$(APP_NAME)_$$dist".zip" 2>/dev/null
-			gh release upload $(RELEASE_VERSION) "./fyne-cross/dist/"$$dist"/"$(APP_NAME)_$$dist".zip" --repo $(PRJ_REPO)
-		else
-			mv "./fyne-cross/dist/"$$dist"/"$(APP_NAME)".tar.xz" "./fyne-cross/dist/"$$dist"/"$(APP_NAME)_$$dist".tar.xz" 2>/dev/null
-			gh release upload $(RELEASE_VERSION) "./fyne-cross/dist/"$$dist"/"$(APP_NAME)_$$dist".tar.xz" --repo $(PRJ_REPO)
-		fi
-	done
-
-git-update:
-	git pull && git fetch && git fetch --all
+#fyne-cross-build-linux: install_fyne_cross_cmd
+#	fyne-cross linux -app-version $(RELEASE_VERSION) -arch amd64,386,arm,arm64 -icon $(ICON) -metadata Details.Version=$(RELEASE_VERSION) \
+#		-name $(APP_NAME) -release -debug
+#
+#fyne-cross-build-windows: install_fyne_cross_cmd
+#	fyne-cross windows -app-version $(RELEASE_VERSION) -arch amd64,386 -icon $(ICON) -metadata Details.Version=$(RELEASE_VERSION) \
+#		-name $(APP_NAME) -debug
+#
+#.ONESHELL:
+#clean-workspace:
+#	rm *.tar.xz 2>/dev/null ;
+#	rm -rf $(BUILD_DIR) 2>/dev/null;
+#	rm -rf ./fyne-cross 2> /dev/null;
+#	rm -rf ./dist 2>/dev/null;
+#	rm -rf ./tmp-pkg 2>/dev/null;
+#	rm fyne_metadata_init.go 2>/dev/null;
+#
+#install_linux_libs:
+#	sudo apt install freeglut3-dev gcc libgl1-mesa-dev xorg-dev libxkbcommon-dev
+#
+#install_fyne_cmd:
+#	go install fyne.io/fyne/v2/cmd/fyne@latest
+#
+#install_fyne_cross_cmd:
+#	go install github.com/fyne-io/fyne-cross@latest
+#
+#git-release:
+#	gh release delete $(RELEASE_VERSION) --cleanup-tag -y --repo $(PRJ_REPO) 2>/dev/null;
+#	git tag -d $(RELEASE_VERSION) 2>/dev/null;
+#	gh release create $(RELEASE_VERSION) --generate-notes --notes "$(RELEASE_VERSION)" --repo $(PRJ_REPO)
+#
+#.ONESHELL:
+#git-upload-release:
+#	$(eval BIN_DIRS := $(shell ls ./fyne-cross/bin/))
+#	$(eval DIST_DIRS := $(shell ls ./fyne-cross/dist/))
+#	@for bin in $(BIN_DIRS); do
+#		if [[ $$bin == *"windows"* ]]; then
+#			mv "./fyne-cross/bin/"$$bin"/"$(APP_NAME)".exe" "./fyne-cross/bin/"$$bin"/"$(APP_NAME)_$$bin".exe" 2>/dev/null
+#			gh release upload $(RELEASE_VERSION) "./fyne-cross/bin/"$$bin"/"$(APP_NAME)_$$bin".exe" --repo $(PRJ_REPO)
+#		else
+#			mv "./fyne-cross/bin/"$$bin"/"$(APP_NAME) "./fyne-cross/bin/"$$bin"/"$(APP_NAME)_$$bin 2>/dev/null
+#			gh release upload $(RELEASE_VERSION) "./fyne-cross/bin/"$$bin"/"$(APP_NAME)_$$bin --repo $(PRJ_REPO)
+#		fi
+#	done
+#	@for dist in $(DIST_DIRS); do
+#		if [[ $$dist == *"windows"* ]]; then
+#			mv "./fyne-cross/dist/"$$dist"/"$(APP_NAME)".zip" "./fyne-cross/dist/"$$dist"/"$(APP_NAME)_$$dist".zip" 2>/dev/null
+#			gh release upload $(RELEASE_VERSION) "./fyne-cross/dist/"$$dist"/"$(APP_NAME)_$$dist".zip" --repo $(PRJ_REPO)
+#		else
+#			mv "./fyne-cross/dist/"$$dist"/"$(APP_NAME)".tar.xz" "./fyne-cross/dist/"$$dist"/"$(APP_NAME)_$$dist".tar.xz" 2>/dev/null
+#			gh release upload $(RELEASE_VERSION) "./fyne-cross/dist/"$$dist"/"$(APP_NAME)_$$dist".tar.xz" --repo $(PRJ_REPO)
+#		fi
+#	done
+#
+#git-update:
+#	git pull && git fetch && git fetch --all
 
 ## Shows help. | Help
 help:
