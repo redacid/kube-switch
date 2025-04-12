@@ -36,6 +36,9 @@ go-mod-tidy:
 go-build:
 	go build ./...
 
+1_start_app:
+	./kube-context-fyne
+
 go-run:
 	go run ./
 

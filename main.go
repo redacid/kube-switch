@@ -3,8 +3,9 @@ package main
 import (
 	"context"
 	"embed"
-	// "errors"
+	"errors"
 	"fmt"
+	"github.com/fsnotify/fsnotify"
 	"log"
 	"os"
 	"os/exec"
@@ -15,8 +16,6 @@ import (
 	"strings"
 	"sync"
 	"time"
-
-	// "github.com/fsnotify/fsnotify"
 
 	// Fyne GUI Toolkit
 	"fyne.io/fyne/v2"
@@ -103,6 +102,10 @@ var (
 	loadingRules       clientcmd.ClientConfigLoadingRules
 	currentClientset   *kubernetes.Clientset
 	stateMu            sync.RWMutex
+
+	// Моніторинг файлу
+	watcher     *fsnotify.Watcher
+	watcherDone chan bool
 )
 
 // Мапи для дерева ресурсів
@@ -183,30 +186,52 @@ func getContexts() ([]string, error) {
 	logDebug("Знайдено: %v", contexts)
 	return contexts, nil
 }
+
+// Змінює current-context у файлі kubeconfig
 func switchContext(contextName string) error {
-	logDebug("Перемикання на '%s'...", contextName)
-	config, configPath, err := loadKubeConfig()
+	logDebug("Перемикання default context на '%s' у файлі...", contextName)
+
+	stateMu.RLock()
+	configPath := kubeconfigFile // Використовуємо визначений шлях
+	stateMu.RUnlock()
+
+	if configPath == "" {
+		return errors.New("шлях до kubeconfig не визначено")
+	}
+
+	// Завантажуємо поточну конфігурацію безпосередньо з файлу
+	config, err := clientcmd.LoadFromFile(configPath)
 	if err != nil {
-		logError("Не вдалося завантажити конфіг: %v", err)
-		return fmt.Errorf("помилка завантаження: %w", err)
+		logError("Не вдалося завантажити '%s' для зміни: %v", configPath, err)
+		// Якщо файл не знайдено, помилка все одно виникне при записі,
+		// але можна додати явну перевірку os.IsNotExist(err) тут, якщо потрібно
+		return fmt.Errorf("неможливо завантажити %s: %w", configPath, err)
 	}
+
+	// Перевіряємо, чи існує контекст, на який перемикаємось
 	if _, exists := config.Contexts[contextName]; !exists {
-		logError("Неіснуючий контекст: %s", contextName)
-		return fmt.Errorf("контекст '%s' не знайдено", contextName)
+		logError("Спроба перемкнутись на неіснуючий контекст: %s", contextName)
+		return fmt.Errorf("контекст '%s' не знайдено у %s", contextName, configPath)
 	}
+
 	if config.CurrentContext == contextName {
-		logInfo("Вже на '%s'.", contextName)
-		return nil
+		logInfo("Контекст '%s' вже є поточним у файлі.", contextName)
+		return nil // Нічого не робимо
 	}
+
+	// Змінюємо поточний контекст у структурі
 	config.CurrentContext = contextName
-	logDebug("Встановлено '%s'", contextName)
-	logDebug("Збереження у %s", configPath)
+	logDebug("Встановлено CurrentContext = '%s' у структурі для запису.", contextName)
+
+	// Записуємо змінену конфігурацію назад у файл
+	logDebug("Спроба зберегти змінену конфігурацію у файл: %s", configPath)
 	err = clientcmd.WriteToFile(*config, configPath)
 	if err != nil {
-		logError("Не вдалося записати '%s': %v", configPath, err)
-		return fmt.Errorf("помилка збереження: %w", err)
+		logError("Не вдалося записати змінену конфігурацію у файл '%s': %v", configPath, err)
+		return fmt.Errorf("помилка збереження конфігурації: %w", err)
 	}
-	logInfo("Перемкнено на '%s' у %s", contextName, configPath)
+
+	logInfo("Успішно змінено default context на '%s' у файлі %s", contextName, configPath)
 	return nil
 }
 
@@ -272,7 +297,7 @@ func updateUIWidgets() {
 	logDebug("Оновлення UI віджетів (Fyne)...")
 	stateMu.RLock()
 	ctxFromFile := currentContextName
-	connCtx := connectedContextName
+	//connCtx := connectedContextName
 	ctxList := allContextNames
 	resType := selectedResourceType
 	statusMsg := ""
@@ -316,22 +341,22 @@ func updateUIWidgets() {
 
 	if contextListWidget != nil { /* ... оновлення списку контекстів ... */
 		contextListWidget.Refresh()
-		targetSelection := connCtx
-		if targetSelection == "" {
-			targetSelection = ctxFromFile
-		}
-		selectedIndex := -1
-		for i, name := range ctxList {
-			if name == targetSelection {
-				selectedIndex = i
-				break
-			}
-		}
-		if selectedIndex != -1 {
-			contextListWidget.Select(selectedIndex)
-		} else {
-			contextListWidget.UnselectAll()
-		}
+		//targetSelection := connCtx
+		//if targetSelection == "" {
+		//	targetSelection = ctxFromFile
+		//}
+		//selectedIndex := -1
+		//for i, name := range ctxList {
+		//	if name == targetSelection {
+		//		selectedIndex = i
+		//		break
+		//	}
+		//}
+		//if selectedIndex != -1 {
+		//	contextListWidget.Select(selectedIndex)
+		//} else {
+		//	contextListWidget.UnselectAll()
+		//}
 	}
 	if resourceTypeTree != nil { /* ... оновлення дерева ... */
 		resourceTypeTree.Refresh()
@@ -1465,6 +1490,8 @@ func openKubeFolder() {
 		logError("Не вдалося відкрити '%s': %v", dir, err)
 	}
 }
+
+// --- Створення меню Fyne ---
 func buildContextMenu() *fyne.Menu {
 	logDebug("Побудова меню Fyne...")
 	stateMu.RLock()
@@ -1473,7 +1500,12 @@ func buildContextMenu() *fyne.Menu {
 	stateMu.RUnlock()
 	refreshItem := fyne.NewMenuItem("Оновити список", func() { logDebug("Клік 'Оновити'"); go loadAndUpdateState() })
 	openFolderItem := fyne.NewMenuItem("Відкрити папку конфігурації", func() { logDebug("Клік 'Відкрити папку'"); openKubeFolder() })
-	quitItem := fyne.NewMenuItem("Вийти", func() { logInfo("Клік 'Вийти'"); fyneApp.Quit() })
+	quitItem := fyne.NewMenuItem("Вийти", func() {
+		logInfo("Клік 'Вийти'")
+		stopFileWatcher()
+		fyneApp.Quit()
+	})
+
 	contextItems := []*fyne.MenuItem{}
 	allContexts, err := getContexts()
 	if err != nil {
@@ -1484,22 +1516,32 @@ func buildContextMenu() *fyne.Menu {
 			contextItems = append(contextItems, fyne.NewMenuItem("(Немає контекстів)", nil))
 		}
 		for _, ctxName := range allContexts {
-			name := ctxName
+			name := ctxName // Захоплення змінної для замикання
 			label := getDisplayName(name)
 			targetSelection := connCtx
 			if targetSelection == "" {
 				targetSelection = currentCtx
-			}
+			} // Позначаємо підключений або поточний з файлу
 			if name == targetSelection {
 				label = "✓ " + label
 			} else {
 				label = "  " + label
 			}
+
 			var action func()
-			if name != connCtx {
-				action = func() { go connectLoadAndRefresh(name) }
+			// Додаємо дію тільки якщо це НЕ поточний контекст з файлу
+			// (щоб уникнути зайвих записів у файл)
+			// АБО якщо ми хочемо завжди мати можливість "підключитися" до поточного
+			// Давайте дозволимо клік на будь-який, крім вже ПІДКЛЮЧЕНОГО
+			// if name != currentCtx { // Попередня логіка
+			if name != connCtx { // Нова логіка: дозволяємо клік, якщо ще не підключені до цього контексту
+				action = func() {
+					logInfo("Вибрано контекст '%s' у меню трея/контекстному меню", name)
+					// Запускаємо зміну default context у файлі та оновлення стану/UI
+					go handleTrayContextSelection(name) // Викликаємо нову функцію
+				}
 			} else {
-				action = nil
+				action = nil // Немає дії для вже активного/підключеного
 			}
 			item := fyne.NewMenuItem(label, action)
 			contextItems = append(contextItems, item)
@@ -1509,6 +1551,27 @@ func buildContextMenu() *fyne.Menu {
 	menu.Items = append(menu.Items, fyne.NewMenuItemSeparator(), refreshItem, openFolderItem)
 	menu.Items = append(menu.Items, fyne.NewMenuItemSeparator(), quitItem)
 	return menu
+}
+
+// Нова функція для обробки вибору контексту з меню (трея або вікна)
+func handleTrayContextSelection(ctxName string) {
+	logInfo("Спроба встановити '%s' як default context та оновити стан...", ctxName)
+	// Спочатку змінюємо файл конфігурації
+	err := switchContext(ctxName)
+	if err != nil {
+		logError("Не вдалося змінити default context на '%s': %v", ctxName, err)
+		// TODO: Показати сповіщення користувачу про помилку?
+		if statusBar != nil {
+			statusBar.SetText(fmt.Sprintf("Помилка зміни default context: %v", err))
+		}
+		return // Не продовжуємо, якщо змінити файл не вдалося
+	}
+	// Якщо файл успішно змінено, запускаємо повне оновлення стану
+	// loadAndUpdateState прочитає новий current-context з файлу
+	loadAndUpdateState()
+	// Після loadAndUpdateState UI оновить мітку поточного контексту
+	// та список, а також скине активне підключення.
+	// Користувач тепер має вибрати тип ресурсу для завантаження.
 }
 func showWindowContextMenu(pos fyne.Position) {
 	menu := buildContextMenu()
@@ -1523,6 +1586,109 @@ func updateSystemTrayMenu() {
 		logDebug("Оновлення меню системного трея...")
 		trayMenu = buildContextMenu() // Перебудовуємо меню на основі поточного стану
 		desktopApp.SetSystemTrayMenu(trayMenu)
+	}
+}
+
+// --- Моніторинг файлу ---
+func setupFileWatcher() {
+	stateMu.RLock()
+	cfgFile := kubeconfigFile
+	cfgEnvSet := isKubeconfigEnvSet
+	stateMu.RUnlock()
+
+	// Не запускаємо моніторинг, якщо використовується змінна KUBECONFIG
+	if cfgEnvSet {
+		logInfo("KUBECONFIG встановлено. Моніторинг файлу вимкнено.")
+		return
+	}
+	if cfgFile == "" {
+		logError("Неможливо налаштувати моніторинг: шлях до kubeconfig порожній.")
+		return
+	}
+
+	var err error
+	watcher, err = fsnotify.NewWatcher()
+	if err != nil {
+		logError("Не вдалося створити file watcher: %v", err)
+		return
+	}
+
+	watchDir := filepath.Dir(cfgFile)
+	if _, err := os.Stat(watchDir); os.IsNotExist(err) {
+		logError("Директорія для моніторингу '%s' не існує.", watchDir)
+		watcher.Close()
+		watcher = nil
+		return
+	}
+
+	// Додаємо директорію для моніторингу
+	// Важливо моніторити саме директорію, бо багато редакторів/інструментів
+	// зберігають файл через тимчасовий файл + перейменування.
+	err = watcher.Add(watchDir)
+	if err != nil {
+		logError("Не вдалося додати шлях '%s' до file watcher: %v", watchDir, err)
+		watcher.Close()
+		watcher = nil
+		return
+	}
+
+	logInfo("Запущено моніторинг файлу: %s (відстеження змін у %s)", watchDir, filepath.Base(cfgFile))
+	watcherDone = make(chan bool)
+
+	// Запускаємо горутину для обробки подій
+	go func() {
+		debounceTimer := time.NewTimer(time.Hour)
+		debounceTimer.Stop() // Неактивний спочатку
+		const debounceDuration = 750 * time.Millisecond
+
+		for {
+			select {
+			case event, ok := <-watcher.Events:
+				if !ok {
+					return
+				} // Канал закрито
+				logDebug("Подія watcher: Name: %s, Op: %s", event.Name, event.Op)
+				stateMu.RLock()
+				currentCfgFile := kubeconfigFile
+				stateMu.RUnlock()
+				// Реагуємо тільки на зміни нашого конфіг файлу
+				if filepath.Clean(event.Name) == filepath.Clean(currentCfgFile) {
+					if event.Has(fsnotify.Write) || event.Has(fsnotify.Create) || event.Has(fsnotify.Rename) || event.Has(fsnotify.Remove) {
+						logInfo("Виявлено зміну у файлі kubeconfig (%s). Перезапуск debounce...", event.Op)
+						debounceTimer.Reset(debounceDuration)
+					}
+				}
+			case err, ok := <-watcher.Errors:
+				if !ok {
+					return
+				} // Канал закрито
+				logError("Помилка watcher: %v", err)
+			case <-debounceTimer.C:
+				logInfo("Debounce timer. Оновлення стану через зміну файлу...")
+				// Викликаємо повне оновлення стану, яке перечитає файл
+				loadAndUpdateState()
+			case <-watcherDone:
+				logInfo("Зупинка горутини file watcher.")
+				watcher.Close() // Закриваємо сам watcher
+				debounceTimer.Stop()
+				return
+			}
+		}
+	}()
+}
+func stopFileWatcher() {
+	if watcher != nil && watcherDone != nil {
+		logInfo("Зупинка file watcher...")
+		// Перевіряємо чи канал вже не закритий перед закриттям
+		select {
+		case <-watcherDone:
+			// Вже закрито
+		default:
+			close(watcherDone) // Сигнал горутині зупинитися
+		}
+		watcher = nil
+		watcherDone = nil
+		logInfo("File watcher зупинено.")
 	}
 }
 
@@ -1618,6 +1784,7 @@ func main() {
 	logInfo("Версія Go: %s", runtime.Version())
 
 	initializeLoadingRules()
+	setupFileWatcher()
 	fyneApp = app.New()
 
 	// --- Повертаємо налаштування трея ---
@@ -2043,7 +2210,11 @@ func main() {
 
 	mainWindow.Resize(fyne.NewSize(900, 700))
 	mainWindow.CenterOnScreen()
-	mainWindow.SetCloseIntercept(func() { logInfo("Закриття вікна..."); fyneApp.Quit() })
+	mainWindow.SetCloseIntercept(func() {
+		logInfo("Закриття вікна...")
+		stopFileWatcher() // <<<--- ЗУПИНЯЄМО МОНІТОРИНГ ПЕРЕД ВИХОДОМ
+		fyneApp.Quit()
+	})
 
 	go loadAndUpdateState()
 	mainWindow.ShowAndRun()
