@@ -1556,15 +1556,15 @@ func buildNotImplementedDetailsView(resourceType, resourceName string) fyne.Canv
 	return container.NewBorder(backButton, nil, nil, nil, container.NewPadded(detailsVBox))
 }
 
-func buildErrorDetailsView(resourceType, resourceName string, err error) fyne.CanvasObject {
-	detailsVBox := container.NewVBox()
-	label := widget.NewLabel(fmt.Sprintf("Помилка завантаження деталей для %s '%s':\n%v", resourceType, resourceName, err))
-	label.Wrapping = fyne.TextWrapWord
-	label.Alignment = fyne.TextAlignCenter
-	detailsVBox.Add(label)
-	backButton := widget.NewButton(labelBackToList, func() { displayResourceList() })
-	return container.NewBorder(backButton, nil, nil, nil, container.NewPadded(detailsVBox))
-}
+//	func buildErrorDetailsView(resourceType, resourceName string, err error) fyne.CanvasObject {
+//		detailsVBox := container.NewVBox()
+//		label := widget.NewLabel(fmt.Sprintf("Помилка завантаження деталей для %s '%s':\n%v", resourceType, resourceName, err))
+//		label.Wrapping = fyne.TextWrapWord
+//		label.Alignment = fyne.TextAlignCenter
+//		detailsVBox.Add(label)
+//		backButton := widget.NewButton(labelBackToList, func() { displayResourceList() })
+//		return container.NewBorder(backButton, nil, nil, nil, container.NewPadded(detailsVBox))
+//	}
 func initializeLoadingRules() {
 	stateMu.Lock()
 	defer stateMu.Unlock()
@@ -2242,152 +2242,166 @@ func main() {
 	resourceListWidget.OnSelected = func(id widget.ListItemID) {
 		stateMu.RLock()
 		resType := selectedResourceType
-		// Оголошуємо змінні ДО switch, щоб вони були доступні потім
-		var obj interface{}
-		var resourceName, resourceNamespace string
-		var fullIdentifier string // Для System Workloads (тип/ім'я)
-		stateMu.RUnlock()         // Розблоковуємо одразу після читання resType
-
-		stateMu.RLock() // Блокуємо знову для читання списків
-		// Отримуємо об'єкт або ідентифікатори залежно від типу
+		var obj interface{}                        // Узагальнений об'єкт
+		var resourceName, resourceNamespace string // Ім'я для заглушки/логування
+		var fullIdentifier string                  // Для System Workloads
+		// Отримуємо повний об'єкт зі зрізу
 		switch resType {
 		case "Namespaces":
 			if id >= 0 && id < len(currentNamespaces) {
 				obj = currentNamespaces[id]
 				resourceName = currentNamespaces[id].Name
-				resourceNamespace = ""
 			}
 		case "Nodes":
 			if id >= 0 && id < len(currentNodes) {
 				obj = currentNodes[id]
 				resourceName = currentNodes[id].Name
-				resourceNamespace = ""
 			}
 		case "Pods":
 			if id >= 0 && id < len(currentPods) {
 				obj = currentPods[id]
 				resourceName = currentPods[id].Name
-				resourceNamespace = currentPods[id].Namespace
 			}
 		case "Deployments":
 			if id >= 0 && id < len(currentDeployments) {
 				obj = currentDeployments[id]
 				resourceName = currentDeployments[id].Name
-				resourceNamespace = currentDeployments[id].Namespace
 			}
 		case "StatefulSets":
 			if id >= 0 && id < len(currentStatefulSets) {
 				obj = currentStatefulSets[id]
 				resourceName = currentStatefulSets[id].Name
-				resourceNamespace = currentStatefulSets[id].Namespace
 			}
 		case "DaemonSets":
 			if id >= 0 && id < len(currentDaemonSets) {
 				obj = currentDaemonSets[id]
 				resourceName = currentDaemonSets[id].Name
-				resourceNamespace = currentDaemonSets[id].Namespace
 			}
 		case "ReplicaSets":
 			if id >= 0 && id < len(currentReplicaSets) {
 				obj = currentReplicaSets[id]
 				resourceName = currentReplicaSets[id].Name
-				resourceNamespace = currentReplicaSets[id].Namespace
 			}
 		case "Jobs":
 			if id >= 0 && id < len(currentJobs) {
 				obj = currentJobs[id]
 				resourceName = currentJobs[id].Name
-				resourceNamespace = currentJobs[id].Namespace
 			}
 		case "CronJobs":
 			if id >= 0 && id < len(currentCronJobs) {
 				obj = currentCronJobs[id]
 				resourceName = currentCronJobs[id].Name
-				resourceNamespace = currentCronJobs[id].Namespace
 			}
 		case "ConfigMaps":
 			if id >= 0 && id < len(currentConfigMaps) {
 				obj = currentConfigMaps[id]
 				resourceName = currentConfigMaps[id].Name
-				resourceNamespace = currentConfigMaps[id].Namespace
 			}
 		case "Secrets":
 			if id >= 0 && id < len(currentSecrets) {
 				obj = currentSecrets[id]
 				resourceName = currentSecrets[id].Name
-				resourceNamespace = currentSecrets[id].Namespace
 			}
 		case "Services":
 			if id >= 0 && id < len(currentServices) {
 				obj = currentServices[id]
 				resourceName = currentServices[id].Name
-				resourceNamespace = currentServices[id].Namespace
 			}
 		case "Ingresses":
 			if id >= 0 && id < len(currentIngresses) {
 				obj = currentIngresses[id]
 				resourceName = currentIngresses[id].Name
-				resourceNamespace = currentIngresses[id].Namespace
+			}
+		case "ServiceAccounts":
+			if id >= 0 && id < len(currentServiceAccounts) {
+				obj = currentServiceAccounts[id]
+				resourceName = currentServiceAccounts[id].Name
+			}
+		case "Roles":
+			if id >= 0 && id < len(currentRoles) {
+				obj = currentRoles[id]
+				resourceName = currentRoles[id].Name
+			}
+		case "RoleBindings":
+			if id >= 0 && id < len(currentRoleBindings) {
+				obj = currentRoleBindings[id]
+				resourceName = currentRoleBindings[id].Name
+			}
+		case "ClusterRoles":
+			if id >= 0 && id < len(currentClusterRoles) {
+				obj = currentClusterRoles[id]
+				resourceName = currentClusterRoles[id].Name
+			}
+		case "ClusterRoleBindings":
+			if id >= 0 && id < len(currentClusterRoleBindings) {
+				obj = currentClusterRoleBindings[id]
+				resourceName = currentClusterRoleBindings[id].Name
+			}
+		case "PersistentVolumes":
+			if id >= 0 && id < len(currentPersistentVolumes) {
+				obj = currentPersistentVolumes[id]
+				resourceName = currentPersistentVolumes[id].Name
+			}
+		case "PersistentVolumeClaims":
+			if id >= 0 && id < len(currentPersistentVolumeClaims) {
+				obj = currentPersistentVolumeClaims[id]
+				resourceName = currentPersistentVolumeClaims[id].Name
+			}
+		case "StorageClasses":
+			if id >= 0 && id < len(currentStorageClasses) {
+				obj = currentStorageClasses[id]
+				resourceName = currentStorageClasses[id].Name
 			}
 		case "System Workloads":
 			if id >= 0 && id < len(currentSystemWorkloads) {
 				fullIdentifier = currentSystemWorkloads[id] // Отримуємо "type/name"
 				parts := strings.SplitN(fullIdentifier, "/", 2)
 				if len(parts) == 2 {
+					// Зберігаємо тип і ім'я для заглушки
+					// Зауважте: реальний тип K8s тут "deploy", "ds", "sts", а не "System Workloads"
 					resourceName = parts[1]
-					resourceNamespace = "kube-system"
-				} else {
-					resourceName = fullIdentifier
-					resourceNamespace = "kube-system"
+					resourceNamespace = "kube-system" // Ми шукали тільки тут
 				}
 			}
 		default:
 			logWarning("Вибрано ресурс невідомого типу '%s' для деталей", resType)
 		}
-		stateMu.RUnlock() // Розблоковуємо після отримання всіх даних зі стану
+		stateMu.RUnlock()
 
-		// Тепер перевіряємо, що ми отримали і що робити
-		if resourceName != "" { // Якщо ми успішно отримали ім'я ресурсу
-			var fullName string
-			if resType == "System Workloads" {
-				fullName = fullIdentifier // Використовуємо "type/name"
-			} else {
-				fullName = resourceName
-				if resourceNamespace != "" && resType != "Namespaces" {
-					fullName = resourceNamespace + "/" + fullName
+		if resType == "System Workloads" && resourceName != "" {
+			// Для системних ворклоадів поки завжди показуємо заглушку
+			// Передаємо розпарсений тип ("deploy", "ds", ...) та ім'я
+			buildNotImplementedDetailsView(resType+" component", fullIdentifier) // Уточнений текст для заглушки
+		} else if obj != nil { // Для стандартних типів, де ми маємо об'єкт
+			fullName := resourceName
+			if resourceNamespace != "" {
+				fullName = resourceNamespace + "/" + fullName
+			}
+			logInfo("Вибрано ресурс '%s': %s", resType, fullName)
+			if statusBar != nil {
+				statusBar.SetText(fmt.Sprintf("Вибрано %s: %s", resType, fullName))
+			}
+			displayResourceDetails(resType, obj) // Викликаємо універсальний диспетчер
+		} else {
+			logWarning("Не вдалося отримати об'єкт для вибраного ресурсу типу '%s', ID: %d", resType, id)
+		}
+
+		if obj != nil {
+			fullName := resourceName
+			// Спробуємо отримати неймспейс, якщо він є у об'єкта (потрібно буде додати для інших типів при потребі)
+			if nsGetter, ok := obj.(interface{ GetNamespace() string }); ok {
+				if ns := nsGetter.GetNamespace(); ns != "" {
+					fullName = ns + "/" + resourceName
 				}
 			}
 			logInfo("Вибрано ресурс '%s': %s", resType, fullName)
 			if statusBar != nil {
 				statusBar.SetText(fmt.Sprintf("Вибрано %s: %s", resType, fullName))
 			}
-
-			// Визначаємо, що показувати
-			if resType == "System Workloads" {
-				// Для системних ворклоадів показуємо заглушку
-				// Наступний крок - отримати реальний об'єкт і показати деталі
-				detailWidget := buildNotImplementedDetailsView(resType+" component", fullName)
-				if rightPanelContainer != nil && detailWidget != nil {
-					rightPanelContainer.Objects = []fyne.CanvasObject{detailWidget}
-					rightPanelContainer.Refresh()
-				}
-				// !!! Важливо: Виходимо з функції ПІСЛЯ обробки цього випадку !!!
-				return // <<<--- ДОДАНО RETURN, щоб не потрапити в останній else
-			} else if obj != nil {
-				// Для інших типів викликаємо диспетчер деталей
-				displayResourceDetails(resType, obj)
-			} else {
-				// Якщо obj == nil для типів, де він очікується
-				logError("Об'єкт для '%s' не знайдено, хоча ім'я є: %s", resType, fullName)
-				detailWidget := buildErrorDetailsView(resType, fullName, errors.New("внутрішня помилка: об'єкт не знайдено у списку"))
-				if rightPanelContainer != nil && detailWidget != nil {
-					rightPanelContainer.Objects = []fyne.CanvasObject{detailWidget}
-					rightPanelContainer.Refresh()
-				}
-			}
+			// Викликаємо універсальну функцію показу деталей
+			displayResourceDetails(resType, obj)
 		} else {
-			// Цей блок тепер має спрацьовувати тільки якщо resourceName == ""
-			logWarning("Не вдалося отримати ідентифікатор/об'єкт для вибраного ресурсу типу '%s', ID: %d", resType, id)
+			logWarning("Не вдалося отримати об'єкт для вибраного ресурсу типу '%s', ID: %d", resType, id)
 		}
 	}
 
