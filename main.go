@@ -307,6 +307,296 @@ func getDisplayName(contextName string) string {
 	}
 	return contextName
 }
+
+// Повертає заголовки колонок для таблиці залежно від типу ресурсу
+func getHeadersForType(resType string) []string {
+	switch resType {
+	case "Namespaces":
+		return []string{"Name", "Status", "Age"}
+	case "Nodes":
+		return []string{"Name", "Status", "Roles", "Version"}
+	case "Pods":
+		return []string{"Name", "Namespace", "Ready", "Restarts", "Controlled By", "Node", "QoS", "Age", "Status"}
+	case "Deployments":
+		return []string{"Name", "Namespace", "Ready", "Age"}
+	case "StatefulSets":
+		return []string{"Name", "Namespace", "Ready", "Age"}
+	case "DaemonSets":
+		return []string{"Name", "Namespace", "Desired", "Current", "Ready"} // Age видалено раніше
+	case "ReplicaSets":
+		return []string{"Name", "Namespace", "Desired", "Current", "Ready"}
+	case "Jobs":
+		return []string{"Name", "Namespace", "Completions", "Age"}
+	case "CronJobs":
+		return []string{"Name", "Namespace", "Schedule", "Suspend", "Last Schedule"}
+	case "ConfigMaps":
+		return []string{"Name", "Namespace", "Data Keys"}
+	case "Secrets":
+		return []string{"Name", "Namespace", "Type", "Data Keys"}
+	case "Services":
+		return []string{"Name", "Namespace", "Type", "ClusterIP", "Ports"}
+	case "Ingresses":
+		return []string{"Name", "Namespace", "Class", "Hosts"}
+	case "System Workloads":
+		return []string{"Component (in kube-system)"}
+	default:
+		return []string{"Name"} // Fallback
+	}
+}
+
+// Форматує дані для конкретної клітинки таблиці
+func formatCellData(resType string, row, col int) string {
+	var dataStr string = ""
+	validRow := false
+
+	// Блокуємо читання даних
+	stateMu.RLock()
+	defer stateMu.RUnlock() // Гарантуємо розблокування
+
+	// Перевірка індексу рядка та отримання даних (як було в UpdateCell)
+	switch resType {
+	case "Namespaces":
+		validRow = row >= 0 && row < len(currentNamespaces)
+		if validRow {
+			ns := currentNamespaces[row]
+			switch col {
+			case 0:
+				dataStr = ns.Name
+			case 1:
+				dataStr = string(ns.Status.Phase)
+			case 2:
+				dataStr = formatAge(ns.CreationTimestamp)
+			}
+		}
+	case "Nodes":
+		validRow = row >= 0 && row < len(currentNodes)
+		if validRow {
+			node := currentNodes[row]
+			switch col {
+			case 0:
+				dataStr = node.Name
+			case 1:
+				dataStr = formatNodeStatus(node.Status.Conditions)
+			case 2:
+				dataStr = formatNodeRoles(node.Labels)
+			case 3:
+				dataStr = node.Status.NodeInfo.KubeletVersion
+			}
+		}
+	case "Pods":
+		validRow = row >= 0 && row < len(currentPods)
+		if validRow {
+			pod := currentPods[row]
+			switch col {
+			case 0:
+				dataStr = pod.Name
+			case 1:
+				dataStr = pod.Namespace
+			case 2:
+				dataStr = formatPodContainers(pod.Status.ContainerStatuses)
+			case 3:
+				dataStr = formatPodRestarts(pod.Status.ContainerStatuses)
+			case 4:
+				dataStr = formatOwnerRefs(pod.OwnerReferences)
+			case 5:
+				dataStr = pod.Spec.NodeName
+			case 6:
+				dataStr = string(pod.Status.QOSClass)
+			case 7:
+				dataStr = formatAge(pod.CreationTimestamp)
+			case 8:
+				dataStr = string(pod.Status.Phase)
+			}
+		}
+	case "Deployments":
+		validRow = row >= 0 && row < len(currentDeployments)
+		if validRow {
+			dep := currentDeployments[row]
+			switch col {
+			case 0:
+				dataStr = dep.Name
+			case 1:
+				dataStr = dep.Namespace
+			case 2:
+				dataStr = fmt.Sprintf("%d/%d", dep.Status.ReadyReplicas, *dep.Spec.Replicas)
+			case 3:
+				dataStr = formatAge(dep.CreationTimestamp)
+			}
+		}
+	case "StatefulSets":
+		validRow = row >= 0 && row < len(currentStatefulSets)
+		if validRow {
+			sts := currentStatefulSets[row]
+			switch col {
+			case 0:
+				dataStr = sts.Name
+			case 1:
+				dataStr = sts.Namespace
+			case 2:
+				dataStr = fmt.Sprintf("%d/%d", sts.Status.ReadyReplicas, *sts.Spec.Replicas)
+			case 3:
+				dataStr = formatAge(sts.CreationTimestamp)
+			}
+		}
+	case "DaemonSets":
+		validRow = row >= 0 && row < len(currentDaemonSets)
+		if validRow {
+			ds := currentDaemonSets[row]
+			switch col {
+			case 0:
+				dataStr = ds.Name
+			case 1:
+				dataStr = ds.Namespace
+			case 2:
+				dataStr = fmt.Sprintf("%d", ds.Status.DesiredNumberScheduled)
+			case 3:
+				dataStr = fmt.Sprintf("%d", ds.Status.CurrentNumberScheduled)
+			case 4:
+				dataStr = fmt.Sprintf("%d", ds.Status.NumberReady)
+			}
+		}
+	case "ReplicaSets":
+		validRow = row >= 0 && row < len(currentReplicaSets)
+		if validRow {
+			rs := currentReplicaSets[row]
+			switch col {
+			case 0:
+				dataStr = rs.Name
+			case 1:
+				dataStr = rs.Namespace
+			case 2:
+				dataStr = fmt.Sprintf("%d", *rs.Spec.Replicas)
+			case 3:
+				dataStr = fmt.Sprintf("%d", rs.Status.Replicas)
+			case 4:
+				dataStr = fmt.Sprintf("%d", rs.Status.ReadyReplicas)
+			}
+		}
+	case "Jobs":
+		validRow = row >= 0 && row < len(currentJobs)
+		if validRow {
+			job := currentJobs[row]
+			switch col {
+			case 0:
+				dataStr = job.Name
+			case 1:
+				dataStr = job.Namespace
+			case 2:
+				comp := "N/A"
+				if job.Spec.Completions != nil {
+					comp = fmt.Sprintf("%d/%d", job.Status.Succeeded, *job.Spec.Completions)
+				} else {
+					comp = fmt.Sprintf("%d/?", job.Status.Succeeded)
+				}
+				dataStr = comp
+			case 3:
+				dataStr = formatAge(job.CreationTimestamp)
+			}
+		}
+	case "CronJobs":
+		validRow = row >= 0 && row < len(currentCronJobs)
+		if validRow {
+			cj := currentCronJobs[row]
+			switch col {
+			case 0:
+				dataStr = cj.Name
+			case 1:
+				dataStr = cj.Namespace
+			case 2:
+				dataStr = cj.Spec.Schedule
+			case 3:
+				susp := "False"
+				if cj.Spec.Suspend != nil && *cj.Spec.Suspend {
+					susp = "True"
+				}
+				dataStr = susp
+			case 4:
+				last := "Never"
+				if cj.Status.LastScheduleTime != nil {
+					last = formatAge(*cj.Status.LastScheduleTime)
+				}
+				dataStr = last
+			}
+		}
+	case "ConfigMaps":
+		validRow = row >= 0 && row < len(currentConfigMaps)
+		if validRow {
+			cm := currentConfigMaps[row]
+			switch col {
+			case 0:
+				dataStr = cm.Name
+			case 1:
+				dataStr = cm.Namespace
+			case 2:
+				dataStr = fmt.Sprintf("%d", len(cm.Data))
+			}
+		}
+	case "Secrets":
+		validRow = row >= 0 && row < len(currentSecrets)
+		if validRow {
+			secret := currentSecrets[row]
+			switch col {
+			case 0:
+				dataStr = secret.Name
+			case 1:
+				dataStr = secret.Namespace
+			case 2:
+				dataStr = string(secret.Type)
+			case 3:
+				dataStr = fmt.Sprintf("%d", len(secret.Data))
+			}
+		}
+	case "Services":
+		validRow = row >= 0 && row < len(currentServices)
+		if validRow {
+			svc := currentServices[row]
+			switch col {
+			case 0:
+				dataStr = svc.Name
+			case 1:
+				dataStr = svc.Namespace
+			case 2:
+				dataStr = string(svc.Spec.Type)
+			case 3:
+				dataStr = strings.Join(svc.Spec.ClusterIPs, ",")
+			case 4:
+				dataStr = formatPorts(svc.Spec.Ports)
+			}
+		}
+	case "Ingresses":
+		validRow = row >= 0 && row < len(currentIngresses)
+		if validRow {
+			ing := currentIngresses[row]
+			switch col {
+			case 0:
+				dataStr = ing.Name
+			case 1:
+				dataStr = ing.Namespace
+			case 2:
+				class := "<default>"
+				if ing.Spec.IngressClassName != nil {
+					class = *ing.Spec.IngressClassName
+				}
+				dataStr = class
+			case 3:
+				dataStr = formatIngressHosts(ing.Spec.Rules)
+			}
+		}
+	case "System Workloads":
+		validRow = row >= 0 && row < len(currentSystemWorkloads)
+		if validRow {
+			if col == 0 {
+				dataStr = currentSystemWorkloads[row]
+			}
+		}
+	}
+
+	if !validRow {
+		logDebug("Спроба форматувати недійсну клітинку: Row %d, Col %d (Type: %s)", row, col, resType)
+	}
+
+	return dataStr
+}
 func formatAge(t metav1.Time) string {
 	d := time.Since(t.Time)
 	if d < time.Minute {
@@ -410,6 +700,110 @@ func formatIngressHosts(rules []networkingv1.IngressRule) string {
 		return "*"
 	}
 	return strings.Join(hosts, ",")
+}
+
+// Розраховує та встановлює ширину колонок таблиці на основі вмісту
+func autoResizeTableColumns(table *widget.Table) {
+	if table == nil {
+		return
+	}
+
+	stateMu.RLock()
+	resType := selectedResourceType
+	stateMu.RUnlock()
+
+	logDebug("Автоматичний розрахунок ширини колонок для типу: %s", resType)
+
+	// Отримуємо кількість рядків та колонок для поточного типу
+	// (можна було б передати, але простіше отримати тут)
+	numRows, numCols := 0, 1
+	stateMu.RLock()
+	switch resType {
+	case "Namespaces":
+		numRows = len(currentNamespaces)
+		numCols = 3
+	case "Nodes":
+		numRows = len(currentNodes)
+		numCols = 4
+	case "Pods":
+		numRows = len(currentPods)
+		numCols = 9
+	case "Deployments":
+		numRows = len(currentDeployments)
+		numCols = 4
+	case "StatefulSets":
+		numRows = len(currentStatefulSets)
+		numCols = 4
+	case "DaemonSets":
+		numRows = len(currentDaemonSets)
+		numCols = 5
+	case "ReplicaSets":
+		numRows = len(currentReplicaSets)
+		numCols = 5
+	case "Jobs":
+		numRows = len(currentJobs)
+		numCols = 4
+	case "CronJobs":
+		numRows = len(currentCronJobs)
+		numCols = 5
+	case "ConfigMaps":
+		numRows = len(currentConfigMaps)
+		numCols = 3
+	case "Secrets":
+		numRows = len(currentSecrets)
+		numCols = 4
+	case "Services":
+		numRows = len(currentServices)
+		numCols = 5
+	case "Ingresses":
+		numRows = len(currentIngresses)
+		numCols = 4
+	case "System Workloads":
+		numRows = len(currentSystemWorkloads)
+		numCols = 1
+	}
+	stateMu.RUnlock()
+
+	if numRows == 0 || numCols == 0 {
+		logDebug("Немає даних або колонок для розрахунку ширини.")
+		// Можна встановити якусь мінімальну ширину за замовчуванням?
+		// table.SetColumnWidth(0, 50) // Приклад
+		return
+	}
+
+	headers := getHeadersForType(resType)
+	if len(headers) != numCols {
+		logError("Невідповідність кількості заголовків (%d) та колонок (%d) для типу %s", len(headers), numCols, resType)
+		// Встановлюємо ширину за замовчуванням для першої колонки хоча б
+		if numCols > 0 {
+			table.SetColumnWidth(0, 150)
+		}
+		return
+	}
+
+	maxWidths := make([]float32, numCols)
+	padding := float32(15) // Додатковий відступ
+
+	// Проходимо по колонках
+	for col := 0; col < numCols; col++ {
+		// Вимірюємо заголовок
+		headerWidth := fyne.MeasureText(headers[col], theme.TextSize(), fyne.TextStyle{Bold: true}).Width
+		maxWidths[col] = headerWidth
+
+		// Проходимо по рядках, щоб знайти максимальну ширину вмісту
+		for row := 0; row < numRows; row++ {
+			cellData := formatCellData(resType, row, col) // Використовуємо хелпер
+			cellWidth := fyne.MeasureText(cellData, theme.TextSize(), fyne.TextStyle{}).Width
+			if cellWidth > maxWidths[col] {
+				maxWidths[col] = cellWidth
+			}
+		}
+		// Додаємо відступ і встановлюємо ширину колонки
+		finalWidth := maxWidths[col] + padding
+		logDebug("Встановлення ширини колонки %d ('%s') = %.2f", col, headers[col], finalWidth)
+		table.SetColumnWidth(col, finalWidth)
+	}
+	logInfo("Автоматичне налаштування ширини колонок завершено для типу: %s", resType)
 }
 
 // --- Оновлення UI віджетів Fyne ---
@@ -1063,9 +1457,17 @@ func loadSelectedResources() {
 			statusBar.SetText(statusMsg)
 		})
 	}
-
-	displayResourceTableView()
-	updateUIWidgets()
+	// --- РОЗРАХУНОК ТА ВСТАНОВЛЕННЯ ШИРИНИ КОЛОНОК ---
+	// Робимо це після оновлення даних, але до оновлення UI,
+	// бо SetColumnWidth може викликати Refresh таблиці.
+	// Викликаємо НЕ в горутині, бо нам потрібні актуальні дані.
+	if err == nil { // Розраховуємо ширину тільки якщо не було помилки завантаження
+		autoResizeTableColumns(resourceTable) // <<<--- ДОДАНО ВИКЛИК
+	}
+	fyne.Do(func() {
+		displayResourceTableView()
+		updateUIWidgets()
+	})
 	logInfo("Завантаження '%s' завершено.", resType)
 }
 
@@ -1151,21 +1553,81 @@ func connectLoadAndRefresh(ctxName string) {
 	}
 }
 
+// --- Додано функцію для побудови заголовка таблиці ---
+func buildTableHeader(resourceType string) fyne.CanvasObject {
+	var headers []string
+	switch resourceType {
+	case "Namespaces":
+		headers = []string{"Name", "Status", "Age"}
+	case "Nodes":
+		headers = []string{"Name", "Status", "Roles", "Version"}
+	case "Pods":
+		headers = []string{"Name", "Namespace", "Ready", "Restarts", "Controlled By", "Node", "QoS", "Age", "Status"}
+	case "Deployments":
+		headers = []string{"Name", "Namespace", "Ready", "Age"}
+	case "StatefulSets":
+		headers = []string{"Name", "Namespace", "Ready", "Age"}
+	case "DaemonSets":
+		headers = []string{"Name", "Namespace", "Desired", "Current", "Ready"} // Removed Age due to col count mismatch
+	case "ReplicaSets":
+		headers = []string{"Name", "Namespace", "Desired", "Current", "Ready"}
+	case "Jobs":
+		headers = []string{"Name", "Namespace", "Completions", "Age"}
+	case "CronJobs":
+		headers = []string{"Name", "Namespace", "Schedule", "Suspend", "Last Schedule"}
+	case "ConfigMaps":
+		headers = []string{"Name", "Namespace", "Data Keys"}
+	case "Secrets":
+		headers = []string{"Name", "Namespace", "Type", "Data Keys"}
+	case "Services":
+		headers = []string{"Name", "Namespace", "Type", "ClusterIP", "Ports"}
+	case "Ingresses":
+		headers = []string{"Name", "Namespace", "Class", "Hosts"}
+	case "System Workloads":
+		headers = []string{"Component (in kube-system)"}
+	default:
+		headers = []string{"Name"} // Fallback
+	}
+
+	headerWidgets := []fyne.CanvasObject{}
+	for _, h := range headers {
+		headerWidgets = append(headerWidgets, widget.NewLabelWithStyle(h, fyne.TextAlignLeading, fyne.TextStyle{Bold: true}))
+	}
+	// Можливо, додати Spacer, щоб розтягнути колонки? Або налаштувати ширину пізніше.
+	// return container.NewGridWithColumns(len(headers), headerWidgets...) // Grid може бути кращим для вирівнювання
+	return container.NewPadded(container.NewHBox(headerWidgets...)) // Padded HBox для початку
+}
+
 // --- Функції для перемикання вмісту правої панелі ---
 func displayResourceTableView() {
-	logDebug("Показ списку ресурсів")
-	if rightPanelContainer != nil && resourceTable != nil {
-		fyne.Do(func() {
-			resourceTable.Refresh()
-		})
-		if len(rightPanelContainer.Objects) == 0 || rightPanelContainer.Objects[0] != resourceTable {
-			rightPanelContainer.Objects = []fyne.CanvasObject{resourceTable}
-			fyne.Do(func() {
-				rightPanelContainer.Refresh()
-			})
+	logDebug("Показ таблиці ресурсів")
+
+	stateMu.RLock()
+	resType := selectedResourceType // Потрібен для створення заголовка
+	stateMu.RUnlock()
+
+	// Динамічно створюємо/оновлюємо заголовок таблиці
+	header := buildTableHeader(resType)
+	// Переконуємося, що таблиця існує
+	if resourceTable == nil {
+		logError("resourceTable є nil при спробі показу таблиці!")
+		return
+	}
+	// Створюємо контейнер для таблиці та її заголовка
+	tableContainer := container.NewBorder(header, nil, nil, nil, resourceTable)
+
+	if rightPanelContainer != nil {
+		resourceTable.Refresh() // Оновлюємо дані таблиці
+		// Встановлюємо контейнер таблиці як вміст правої панелі
+		if len(rightPanelContainer.Objects) == 0 || rightPanelContainer.Objects[0] != tableContainer {
+			rightPanelContainer.Objects = []fyne.CanvasObject{tableContainer}
+		} else {
+			// Якщо контейнер вже там, просто оновлюємо його (заголовок міг змінитися)
+			rightPanelContainer.Objects[0] = tableContainer
 		}
+		rightPanelContainer.Refresh()
 	} else {
-		logError("rightPanelContainer або resourceTable є nil при показі списку")
+		logError("rightPanelContainer є nil при показі таблиці")
 	}
 }
 
@@ -2132,15 +2594,16 @@ func displayClusterOverview(serverVersion string) {
 // --- Головна функція та запуск Fyne ---
 func main() {
 	log.SetFlags(log.Ldate | log.Ltime)
-	logInfo("Запуск " + logPrefix + "...") // Використовуємо оновлений префікс
+	logInfo("Запуск " + logPrefix + "...")
 	logInfo("Версія Go: %s", runtime.Version())
 
 	initializeLoadingRules()
-	fyneApp = app.NewWithID(appID)
-	mainWindow = fyneApp.NewWindow(appTitle) // Використовуємо оновлений заголовок
-	selectedResourceType = "Nodes"           // Починаємо з вузлів за замовчуванням
+	setupFileWatcher() // Повернули запуск watcher
 
-	// --- Налаштування трея (як у вашій версії) ---
+	fyneApp = app.New()
+	mainWindow = fyneApp.NewWindow(appTitle)
+	selectedResourceType = "Nodes"
+
 	resIconPng := fyne.NewStaticResource("icon.png", iconData)
 	if len(iconData) == 0 {
 		logWarning("Дані іконки для трея порожні! Перевірте наявність icon.png та директиву //go:embed.")
@@ -2160,9 +2623,7 @@ func main() {
 		desktopApp = nil
 		logInfo("Системний трей не підтримується.")
 	}
-	// -------------------------------------------
 
-	// --- Створюємо UI елементи ---
 	currentContextLabel = widget.NewLabel(labelLoading)
 	statusBar = widget.NewLabel("Ініціалізація...")
 
@@ -2257,62 +2718,63 @@ func main() {
 	resourceTypeTree.OpenBranch("Cluster")
 	resourceTypeTree.OpenBranch("Workloads")
 
-	// --- Створення Таблиці Ресурсів ---
 	resourceTable = widget.NewTable(
 		func() (int, int) {
 			stateMu.RLock()
 			defer stateMu.RUnlock()
 			rows := 0
-			cols := 1 // Default
+			cols := 1
 			switch selectedResourceType {
 			case "Namespaces":
 				rows = len(currentNamespaces)
-				cols = 3 // Name, Status, Age
+				cols = 3
 			case "Nodes":
 				rows = len(currentNodes)
-				cols = 4 // Name, Status, Roles, Version
+				cols = 4
 			case "Pods":
 				rows = len(currentPods)
-				cols = 9 // Name, Namespace, Containers, Restarts, Controlled By, Node, QoS, Age, Status
+				cols = 9
 			case "Deployments":
 				rows = len(currentDeployments)
-				cols = 4 // Name, Namespace, Ready, Age
+				cols = 4
 			case "StatefulSets":
 				rows = len(currentStatefulSets)
-				cols = 4 // Name, Namespace, Ready, Age
+				cols = 4
 			case "DaemonSets":
 				rows = len(currentDaemonSets)
-				cols = 5 // Name, Namespace, Desired, Current, Ready
+				cols = 5
 			case "ReplicaSets":
 				rows = len(currentReplicaSets)
-				cols = 5 // Name, Namespace, Desired, Current, Ready
+				cols = 5
 			case "Jobs":
 				rows = len(currentJobs)
-				cols = 4 // Name, Namespace, Completions, Age
+				cols = 4
 			case "CronJobs":
 				rows = len(currentCronJobs)
-				cols = 5 // Name, Namespace, Schedule, Suspend, Last Schedule
+				cols = 5
 			case "ConfigMaps":
 				rows = len(currentConfigMaps)
-				cols = 3 // Name, Namespace, Data Keys
+				cols = 3
 			case "Secrets":
 				rows = len(currentSecrets)
-				cols = 4 // Name, Namespace, Type, Data Keys
+				cols = 4
 			case "Services":
 				rows = len(currentServices)
-				cols = 5 // Name, Namespace, Type, ClusterIP, Ports
+				cols = 5
 			case "Ingresses":
 				rows = len(currentIngresses)
-				cols = 4 // Name, Namespace, Class, Hosts
+				cols = 4
 			case "System Workloads":
 				rows = len(currentSystemWorkloads)
+				cols = 1
+			default:
+				rows = 0
 				cols = 1
 			}
 			logDebug("Table Length: Rows=%d, Cols=%d for Type=%s", rows, cols, selectedResourceType)
 			return rows, cols
-		},
+		}, // Виправлено logTrace на logDebug
 		func() fyne.CanvasObject {
-			// Додаємо властивість truncation для довгих імен
 			l := widget.NewLabel("Template")
 			l.Truncation = fyne.TextTruncateEllipsis
 			return l
@@ -2321,255 +2783,19 @@ func main() {
 			label := cell.(*widget.Label)
 			stateMu.RLock()
 			resType := selectedResourceType
-			var dataStr string = ""
-			validRow := false
-			// Визначаємо, чи дійсний рядок для поточного типу
-			switch resType {
-			case "Namespaces":
-				validRow = id.Row >= 0 && id.Row < len(currentNamespaces)
-			case "Nodes":
-				validRow = id.Row >= 0 && id.Row < len(currentNodes)
-			case "Pods":
-				validRow = id.Row >= 0 && id.Row < len(currentPods)
-			case "Deployments":
-				validRow = id.Row >= 0 && id.Row < len(currentDeployments)
-			case "StatefulSets":
-				validRow = id.Row >= 0 && id.Row < len(currentStatefulSets)
-			case "DaemonSets":
-				validRow = id.Row >= 0 && id.Row < len(currentDaemonSets)
-			case "ReplicaSets":
-				validRow = id.Row >= 0 && id.Row < len(currentReplicaSets)
-			case "Jobs":
-				validRow = id.Row >= 0 && id.Row < len(currentJobs)
-			case "CronJobs":
-				validRow = id.Row >= 0 && id.Row < len(currentCronJobs)
-			case "ConfigMaps":
-				validRow = id.Row >= 0 && id.Row < len(currentConfigMaps)
-			case "Secrets":
-				validRow = id.Row >= 0 && id.Row < len(currentSecrets)
-			case "Services":
-				validRow = id.Row >= 0 && id.Row < len(currentServices)
-			case "Ingresses":
-				validRow = id.Row >= 0 && id.Row < len(currentIngresses)
-			case "System Workloads":
-				validRow = id.Row >= 0 && id.Row < len(currentSystemWorkloads)
-			}
-
-			if validRow {
-				// Отримуємо дані для конкретної колонки (id.Col)
-				switch resType {
-				case "Namespaces":
-					ns := currentNamespaces[id.Row]
-					switch id.Col {
-					case 0:
-						dataStr = ns.Name
-					case 1:
-						dataStr = string(ns.Status.Phase)
-					case 2:
-						dataStr = formatAge(ns.CreationTimestamp)
-					}
-				case "Nodes":
-					node := currentNodes[id.Row]
-					switch id.Col {
-					case 0:
-						dataStr = node.Name
-					case 1:
-						dataStr = formatNodeStatus(node.Status.Conditions)
-					case 2:
-						dataStr = formatNodeRoles(node.Labels)
-					case 3:
-						dataStr = node.Status.NodeInfo.KubeletVersion
-					}
-				case "Pods":
-					pod := currentPods[id.Row]
-					switch id.Col {
-					case 0:
-						dataStr = pod.Name
-					case 1:
-						dataStr = pod.Namespace
-					case 2:
-						dataStr = formatPodContainers(pod.Status.ContainerStatuses)
-					case 3:
-						dataStr = formatPodRestarts(pod.Status.ContainerStatuses)
-					case 4:
-						dataStr = formatOwnerRefs(pod.OwnerReferences)
-					case 5:
-						dataStr = pod.Spec.NodeName
-					case 6:
-						dataStr = string(pod.Status.QOSClass)
-					case 7:
-						dataStr = formatAge(pod.CreationTimestamp)
-					case 8:
-						dataStr = string(pod.Status.Phase)
-					}
-				case "Deployments":
-					dep := currentDeployments[id.Row]
-					switch id.Col {
-					case 0:
-						dataStr = dep.Name
-					case 1:
-						dataStr = dep.Namespace
-					case 2:
-						dataStr = fmt.Sprintf("%d/%d", dep.Status.ReadyReplicas, *dep.Spec.Replicas)
-					case 3:
-						dataStr = formatAge(dep.CreationTimestamp)
-					}
-				case "StatefulSets":
-					sts := currentStatefulSets[id.Row]
-					switch id.Col {
-					case 0:
-						dataStr = sts.Name
-					case 1:
-						dataStr = sts.Namespace
-					case 2:
-						dataStr = fmt.Sprintf("%d/%d", sts.Status.ReadyReplicas, *sts.Spec.Replicas)
-					case 3:
-						dataStr = formatAge(sts.CreationTimestamp)
-					}
-				case "DaemonSets":
-					ds := currentDaemonSets[id.Row]
-					switch id.Col {
-					case 0:
-						dataStr = ds.Name
-					case 1:
-						dataStr = ds.Namespace
-					case 2:
-						dataStr = fmt.Sprintf("%d", ds.Status.DesiredNumberScheduled)
-					case 3:
-						dataStr = fmt.Sprintf("%d", ds.Status.CurrentNumberScheduled)
-					case 4:
-						dataStr = fmt.Sprintf("%d", ds.Status.NumberReady)
-					}
-				case "ReplicaSets":
-					rs := currentReplicaSets[id.Row]
-					switch id.Col {
-					case 0:
-						dataStr = rs.Name
-					case 1:
-						dataStr = rs.Namespace
-					case 2:
-						dataStr = fmt.Sprintf("%d", *rs.Spec.Replicas)
-					case 3:
-						dataStr = fmt.Sprintf("%d", rs.Status.Replicas)
-					case 4:
-						dataStr = fmt.Sprintf("%d", rs.Status.ReadyReplicas)
-					}
-				case "Jobs":
-					job := currentJobs[id.Row]
-					switch id.Col {
-					case 0:
-						dataStr = job.Name
-					case 1:
-						dataStr = job.Namespace
-					case 2:
-						comp := "N/A"
-						if job.Spec.Completions != nil {
-							comp = fmt.Sprintf("%d/%d", job.Status.Succeeded, *job.Spec.Completions)
-						} else {
-							comp = fmt.Sprintf("%d/?", job.Status.Succeeded)
-						}
-						dataStr = comp
-					case 3:
-						dataStr = formatAge(job.CreationTimestamp)
-					}
-				case "CronJobs":
-					cj := currentCronJobs[id.Row]
-					switch id.Col {
-					case 0:
-						dataStr = cj.Name
-					case 1:
-						dataStr = cj.Namespace
-					case 2:
-						dataStr = cj.Spec.Schedule
-					case 3:
-						susp := "False"
-						if cj.Spec.Suspend != nil && *cj.Spec.Suspend {
-							susp = "True"
-						}
-						dataStr = susp
-					case 4:
-						last := "Never"
-						if cj.Status.LastScheduleTime != nil {
-							last = formatAge(*cj.Status.LastScheduleTime)
-						}
-						dataStr = last
-					}
-				case "ConfigMaps":
-					cm := currentConfigMaps[id.Row]
-					switch id.Col {
-					case 0:
-						dataStr = cm.Name
-					case 1:
-						dataStr = cm.Namespace
-					case 2:
-						dataStr = fmt.Sprintf("%d", len(cm.Data))
-					}
-				case "Secrets":
-					secret := currentSecrets[id.Row]
-					switch id.Col {
-					case 0:
-						dataStr = secret.Name
-					case 1:
-						dataStr = secret.Namespace
-					case 2:
-						dataStr = string(secret.Type)
-					case 3:
-						dataStr = fmt.Sprintf("%d", len(secret.Data))
-					}
-				case "Services":
-					svc := currentServices[id.Row]
-					switch id.Col {
-					case 0:
-						dataStr = svc.Name
-					case 1:
-						dataStr = svc.Namespace
-					case 2:
-						dataStr = string(svc.Spec.Type)
-					case 3:
-						dataStr = strings.Join(svc.Spec.ClusterIPs, ",")
-					case 4:
-						dataStr = formatPorts(svc.Spec.Ports)
-					}
-				case "Ingresses":
-					ing := currentIngresses[id.Row]
-					switch id.Col {
-					case 0:
-						dataStr = ing.Name
-					case 1:
-						dataStr = ing.Namespace
-					case 2:
-						class := "<default>"
-						if ing.Spec.IngressClassName != nil {
-							class = *ing.Spec.IngressClassName
-						}
-						dataStr = class
-					case 3:
-						dataStr = formatIngressHosts(ing.Spec.Rules)
-					}
-				case "System Workloads":
-					if id.Col == 0 {
-						dataStr = currentSystemWorkloads[id.Row]
-					}
-				}
-			} else {
-				logDebug("Спроба оновити недійсну клітинку: Row %d, Col %d (Type: %s)", id.Row, id.Col, resType)
-			} // Змінено на Trace
 			stateMu.RUnlock()
+			dataStr := formatCellData(resType, id.Row, id.Col)
 			label.SetText(dataStr)
 		},
 	)
-
-	// Обробник вибору рядка в таблиці (тепер використовує resourceTable)
 	resourceTable.OnSelected = func(id widget.TableCellID) {
-		row := id.Row // Нам потрібен лише індекс рядка
+		row := id.Row
 		logDebug("Вибрано рядок таблиці: %d", row)
-
 		stateMu.RLock()
 		resType := selectedResourceType
 		var obj interface{}
 		var resourceName, resourceNamespace string
 		var fullIdentifier string
-
 		switch resType {
 		case "Namespaces":
 			if row >= 0 && row < len(currentNamespaces) {
@@ -2623,7 +2849,7 @@ func main() {
 			if row >= 0 && row < len(currentCronJobs) {
 				obj = currentCronJobs[row]
 				resourceName = currentCronJobs[row].Name
-				resourceNamespace = currentCronJobs[id.Row].Namespace
+				resourceNamespace = currentCronJobs[row].Namespace
 			}
 		case "ConfigMaps":
 			if row >= 0 && row < len(currentConfigMaps) {
@@ -2665,7 +2891,6 @@ func main() {
 			logWarning("Вибрано ресурс невідомого типу '%s' для деталей", resType)
 		}
 		stateMu.RUnlock()
-
 		if resourceName != "" {
 			fullName := resourceName
 			if resourceNamespace != "" && resType != "Namespaces" && resType != "Nodes" {
@@ -2675,7 +2900,6 @@ func main() {
 			if statusBar != nil {
 				statusBar.SetText(fmt.Sprintf("Вибрано %s: %s", resType, fullName))
 			}
-
 			if resType == "System Workloads" {
 				parts := strings.SplitN(fullIdentifier, "/", 2)
 				if len(parts) == 2 {
@@ -2701,32 +2925,15 @@ func main() {
 		} else {
 			logWarning("Не вдалося отримати ідентифікатор для вибраного рядка типу '%s', Row: %d", resType, row)
 		}
-		resourceTable.Unselect(id) // Знімаємо візуальне виділення з таблиці
+		resourceTable.Unselect(id)
 	}
 
-	// --- Збираємо макет вікна ---
 	leftPanelContent := container.NewVSplit(container.NewBorder(container.NewPadded(widget.NewLabel("Контексти:")), nil, nil, nil, contextListWidget), container.NewBorder(container.NewPadded(widget.NewLabel("Ресурси:")), nil, nil, nil, resourceTypeTree))
 	leftPanelContent.Offset = 0.5
-
-	// --- Права панель з Заголовком і Таблицею ---
-	// TODO: Зробити headerRow динамічним
-	headerRow := container.NewHBox(
-		widget.NewLabelWithStyle("Col 1", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-		widget.NewLabelWithStyle("Col 2", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-		widget.NewLabelWithStyle("Col 3", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-		widget.NewLabelWithStyle("Col 4", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-		widget.NewLabelWithStyle("Col 5", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-		widget.NewLabelWithStyle("Col 6", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-		widget.NewLabelWithStyle("Col 7", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-		widget.NewLabelWithStyle("Col 8", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-		widget.NewLabelWithStyle("Col 9", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
-	)
-	// Створюємо контейнер для таблиці та її заголовка
-	// Важливо: resourceTable має бути ініціалізований ДО цього моменту
-	resourceTableContainer := container.NewBorder(headerRow, nil, nil, nil, resourceTable)
-	// -----------------------------------------
-
-	rightPanelContainer = container.NewMax(resourceTableContainer) // Починаємо з таблиці
+	// Замість статичного заголовка використовуємо контейнер, який буде оновлюватись
+	resourceTableHeader := container.NewHBox(widget.NewLabelWithStyle("Завантаження...", fyne.TextAlignLeading, fyne.TextStyle{Bold: true})) // Початковий заголовок
+	resourceTableContainer := container.NewBorder(resourceTableHeader, nil, nil, nil, resourceTable)
+	rightPanelContainer = container.NewMax(resourceTableContainer)
 	tappableRightPanel := &tappableContainer{content: rightPanelContainer}
 	tappableRightPanel.ExtendBaseWidget(tappableRightPanel)
 	split := container.NewHSplit(leftPanelContent, tappableRightPanel)
@@ -2735,8 +2942,8 @@ func main() {
 	mainWindow.SetContent(mainLayout)
 
 	mainWindow.Resize(fyne.NewSize(1024, 768))
-	mainWindow.CenterOnScreen()                                                                                    // Збільшимо ще
-	mainWindow.SetCloseIntercept(func() { logInfo("Закриття вікна..."); /* stopFileWatcher(); */ fyneApp.Quit() }) // Повернемо stopFileWatcher, коли буде активний
+	mainWindow.CenterOnScreen()
+	mainWindow.SetCloseIntercept(func() { logInfo("Закриття вікна..."); stopFileWatcher(); fyneApp.Quit() }) // Повернули stopFileWatcher
 
 	go loadAndUpdateState()
 	mainWindow.ShowAndRun()
