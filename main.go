@@ -64,14 +64,23 @@ var (
 	desktopApp          desktop.App
 	trayMenu            *fyne.Menu
 
-	resourceTreeData  = map[resourceTreeNodeID][]resourceTreeNodeID{"": {"Cluster", "Workloads", "Network", "Storage", "Configuration", "Access Control"}, "Cluster": {"Namespaces", "Nodes"}, "Workloads": {"Pods", "Deployments", "StatefulSets", "DaemonSets", "ReplicaSets", "Jobs", "CronJobs"}, "Network": {"Services", "Ingresses"}, "Storage": {"PersistentVolumes", "PersistentVolumeClaims", "StorageClasses"}, "Configuration": {"ConfigMaps", "Secrets"}, "Access Control": {"ServiceAccounts", "Roles", "RoleBindings", "ClusterRoles", "ClusterRoleBindings"}}
-	resourceLeafNodes = map[resourceTreeNodeID]bool{"Namespaces": true, "Nodes": true, "Pods": true, "Deployments": true, "StatefulSets": true, "DaemonSets": true, "ReplicaSets": true, "Jobs": true, "CronJobs": true, "Services": true, "Ingresses": true, "PersistentVolumes": true, "PersistentVolumeClaims": true, "StorageClasses": true, "ConfigMaps": true, "Secrets": true, "ServiceAccounts": true, "Roles": true, "RoleBindings": true, "ClusterRoles": true, "ClusterRoleBindings": true}
+	resourceTreeData = map[resourceTreeNodeID][]resourceTreeNodeID{
+		"":               {"Cluster", "Workloads", "Network", "Storage", "Configuration", "Access Control"},
+		"Cluster":        {"Namespaces", "Nodes", "System Workloads"}, // <<<--- ЗМІНЕНО/ДОДАНО
+		"Workloads":      {"Pods", "Deployments", "StatefulSets", "DaemonSets", "ReplicaSets", "Jobs", "CronJobs"},
+		"Network":        {"Services", "Ingresses"},
+		"Storage":        {"PersistentVolumes", "PersistentVolumeClaims", "StorageClasses"},
+		"Configuration":  {"ConfigMaps", "Secrets"},
+		"Access Control": {"ServiceAccounts", "Roles", "RoleBindings", "ClusterRoles", "ClusterRoleBindings"},
+	}
+	resourceLeafNodes = map[resourceTreeNodeID]bool{"Namespaces": true, "Nodes": true, "Pods": true, "Deployments": true, "StatefulSets": true, "DaemonSets": true, "ReplicaSets": true, "Jobs": true, "CronJobs": true, "Services": true, "Ingresses": true, "PersistentVolumes": true, "PersistentVolumeClaims": true, "StorageClasses": true, "ConfigMaps": true, "Secrets": true, "ServiceAccounts": true, "Roles": true, "RoleBindings": true, "ClusterRoles": true, "ClusterRoleBindings": true, "System Workloads": true}
 	arnRegex          = regexp.MustCompile(`^arn:aws:eks:[^:]+:(\d+):cluster/(.+)$`)
 
-	currentContextName   string
-	connectedContextName string
-	allContextNames      []string
-	selectedResourceType string
+	currentSystemWorkloads []string
+	currentContextName     string
+	connectedContextName   string
+	allContextNames        []string
+	selectedResourceType   string
 	// Списки ресурсів
 	currentNodes        []corev1.Node
 	currentNamespaces   []corev1.Namespace
@@ -328,6 +337,7 @@ func updateUIWidgets() {
 	pvCount := len(currentPersistentVolumes)
 	pvcCount := len(currentPersistentVolumeClaims)
 	scCount := len(currentStorageClasses)
+	sysWorkloadCount := len(currentSystemWorkloads)
 
 	stateMu.RUnlock()
 
@@ -413,6 +423,8 @@ func updateUIWidgets() {
 			resourceCount = pvcCount
 		case "StorageClasses":
 			resourceCount = scCount
+		case "System Workloads":
+			resourceCount = sysWorkloadCount
 		// Додайте інші типи тут...
 		default:
 			resourceCount = 0
@@ -468,6 +480,7 @@ func loadAndUpdateState() {
 	currentServices = nil
 	currentIngresses = nil
 	selectedResourceType = "Nodes"
+	currentSystemWorkloads = nil
 	stateMu.Unlock()
 
 	var statusMsg string
@@ -551,6 +564,7 @@ func loadSelectedResources() {
 	newPersistentVolumes := []corev1.PersistentVolume{}
 	newPersistentVolumeClaims := []corev1.PersistentVolumeClaim{}
 	newStorageClasses := []storagev1.StorageClass{}
+	newSystemWorkloads := []string{}
 	listOptions := metav1.ListOptions{}
 	ctxTimeout, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -781,6 +795,47 @@ func loadSelectedResources() {
 			newStorageClasses = list.Items
 			sort.Slice(newStorageClasses, func(i, j int) bool { return newStorageClasses[i].Name < newStorageClasses[j].Name })
 		}
+	case "System Workloads":
+		logInfo("Завантаження системних компонентів з kube-system...")
+		workloadNamespace := "kube-system"
+		var combinedErr error // Збираємо помилки
+
+		// Deployments
+		depList, depErr := clientset.AppsV1().Deployments(workloadNamespace).List(ctxTimeout, listOptions)
+		if depErr != nil {
+			logError("Помилка List Deployments (%s): %v", workloadNamespace, depErr)
+			errors.Join(combinedErr, depErr)
+		} else {
+			for _, item := range depList.Items {
+				newSystemWorkloads = append(newSystemWorkloads, fmt.Sprintf("deploy/%s", item.Name))
+			}
+		}
+		// DaemonSets
+		dsList, dsErr := clientset.AppsV1().DaemonSets(workloadNamespace).List(ctxTimeout, listOptions)
+		if dsErr != nil {
+			logError("Помилка List DaemonSets (%s): %v", workloadNamespace, dsErr)
+			errors.Join(combinedErr, dsErr)
+		} else {
+			for _, item := range dsList.Items {
+				newSystemWorkloads = append(newSystemWorkloads, fmt.Sprintf("ds/%s", item.Name))
+			}
+		}
+		// StatefulSets
+		stsList, stsErr := clientset.AppsV1().StatefulSets(workloadNamespace).List(ctxTimeout, listOptions)
+		if stsErr != nil {
+			logError("Помилка List StatefulSets (%s): %v", workloadNamespace, stsErr)
+			errors.Join(combinedErr, stsErr)
+		} else {
+			for _, item := range stsList.Items {
+				newSystemWorkloads = append(newSystemWorkloads, fmt.Sprintf("sts/%s", item.Name))
+			}
+		}
+
+		sort.Strings(newSystemWorkloads)
+		err = combinedErr // Встановлюємо загальну помилку
+		if err != nil {
+			statusMsg = fmt.Sprintf("Помилка завантаження компонентів: %v", err)
+		}
 	default:
 		logWarning("Невідомий тип ресурсу: %s", resType)
 		err = fmt.Errorf("тип %s не підтримується", resType)
@@ -836,6 +891,8 @@ func loadSelectedResources() {
 		currentPersistentVolumeClaims = newPersistentVolumeClaims
 	case "StorageClasses":
 		currentStorageClasses = newStorageClasses
+	case "System Workloads":
+		currentSystemWorkloads = newSystemWorkloads
 	}
 	stateMu.Unlock()
 
@@ -870,6 +927,8 @@ func loadSelectedResources() {
 				count = len(newServices)
 			case "Ingresses":
 				count = len(newIngresses)
+			case "System Workloads":
+				count = len(newSystemWorkloads)
 			}
 			statusMsg = fmt.Sprintf("Підключено: %s | %s: %d", getDisplayName(contextName), resType, count)
 		}
@@ -927,6 +986,7 @@ func connectLoadAndRefresh(ctxName string) {
 		currentSecrets = nil
 		currentServices = nil
 		currentIngresses = nil
+		currentSystemWorkloads = nil
 		logDebug("Збережено clientset: %s. Очікування вибору типу ресурсу.", ctxName)
 		stateMu.Unlock()
 		// НЕ запускаємо loadSelectedResources автоматично
@@ -2015,6 +2075,8 @@ func main() {
 				return len(currentPersistentVolumeClaims)
 			case "StorageClasses":
 				return len(currentStorageClasses)
+			case "System Workloads":
+				return len(currentSystemWorkloads)
 			default:
 				return 0
 			}
@@ -2115,6 +2177,10 @@ func main() {
 				if id >= 0 && id < len(currentStorageClasses) {
 					name = currentStorageClasses[id].Name
 				}
+			case "System Workloads":
+				if id >= 0 && id < len(currentSystemWorkloads) {
+					name = currentSystemWorkloads[id]
+				}
 			}
 			stateMu.RUnlock()
 			item.(*widget.Label).SetText(name)
@@ -2123,8 +2189,9 @@ func main() {
 	resourceListWidget.OnSelected = func(id widget.ListItemID) {
 		stateMu.RLock()
 		resType := selectedResourceType
-		var obj interface{}     // Узагальнений об'єкт
-		var resourceName string // Ім'я для заглушки/логування
+		var obj interface{}                        // Узагальнений об'єкт
+		var resourceName, resourceNamespace string // Ім'я для заглушки/логування
+		var fullIdentifier string                  // Для System Workloads
 		// Отримуємо повний об'єкт зі зрізу
 		switch resType {
 		case "Namespaces":
@@ -2232,10 +2299,39 @@ func main() {
 				obj = currentStorageClasses[id]
 				resourceName = currentStorageClasses[id].Name
 			}
+		case "System Workloads":
+			if id >= 0 && id < len(currentSystemWorkloads) {
+				fullIdentifier = currentSystemWorkloads[id] // Отримуємо "type/name"
+				parts := strings.SplitN(fullIdentifier, "/", 2)
+				if len(parts) == 2 {
+					// Зберігаємо тип і ім'я для заглушки
+					// Зауважте: реальний тип K8s тут "deploy", "ds", "sts", а не "System Workloads"
+					resourceName = parts[1]
+					resourceNamespace = "kube-system" // Ми шукали тільки тут
+				}
+			}
 		default:
 			logWarning("Вибрано ресурс невідомого типу '%s' для деталей", resType)
 		}
 		stateMu.RUnlock()
+
+		if resType == "System Workloads" && resourceName != "" {
+			// Для системних ворклоадів поки завжди показуємо заглушку
+			// Передаємо розпарсений тип ("deploy", "ds", ...) та ім'я
+			displayNotImplementedDetails(resType+" component", fullIdentifier) // Уточнений текст для заглушки
+		} else if obj != nil { // Для стандартних типів, де ми маємо об'єкт
+			fullName := resourceName
+			if resourceNamespace != "" {
+				fullName = resourceNamespace + "/" + fullName
+			}
+			logInfo("Вибрано ресурс '%s': %s", resType, fullName)
+			if statusBar != nil {
+				statusBar.SetText(fmt.Sprintf("Вибрано %s: %s", resType, fullName))
+			}
+			displayResourceDetails(resType, obj) // Викликаємо універсальний диспетчер
+		} else {
+			logWarning("Не вдалося отримати об'єкт для вибраного ресурсу типу '%s', ID: %d", resType, id)
+		}
 
 		if obj != nil {
 			fullName := resourceName
