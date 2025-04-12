@@ -61,6 +61,7 @@ var (
 	resourceTypeTree    *widget.Tree
 	//resourceListWidget  *widget.List
 	resourceTable       *widget.Table
+	resourceTableHeader fyne.CanvasObject
 	rightPanelContainer *fyne.Container
 	statusBar           *widget.Label
 	desktopApp          desktop.App
@@ -703,21 +704,12 @@ func formatIngressHosts(rules []networkingv1.IngressRule) string {
 }
 
 // Розраховує та встановлює ширину колонок таблиці на основі вмісту
-func autoResizeTableColumns(table *widget.Table) {
-	if table == nil {
-		return
-	}
+// Розраховує ширину колонок на основі вмісту та заголовків
+func calculateColumnWidths(resType string) []float32 {
+	logDebug("Розрахунок ширини колонок для типу: %s", resType)
 
 	stateMu.RLock()
-	resType := selectedResourceType
-	stateMu.RUnlock()
-
-	logDebug("Автоматичний розрахунок ширини колонок для типу: %s", resType)
-
-	// Отримуємо кількість рядків та колонок для поточного типу
-	// (можна було б передати, але простіше отримати тут)
 	numRows, numCols := 0, 1
-	stateMu.RLock()
 	switch resType {
 	case "Namespaces":
 		numRows = len(currentNamespaces)
@@ -766,44 +758,44 @@ func autoResizeTableColumns(table *widget.Table) {
 
 	if numRows == 0 || numCols == 0 {
 		logDebug("Немає даних або колонок для розрахунку ширини.")
-		// Можна встановити якусь мінімальну ширину за замовчуванням?
-		// table.SetColumnWidth(0, 50) // Приклад
-		return
+		// Повертаємо nil або зріз нулів, щоб SetColumnWidth не викликався
+		return nil
 	}
 
 	headers := getHeadersForType(resType)
 	if len(headers) != numCols {
-		logError("Невідповідність кількості заголовків (%d) та колонок (%d) для типу %s", len(headers), numCols, resType)
-		// Встановлюємо ширину за замовчуванням для першої колонки хоча б
-		if numCols > 0 {
-			table.SetColumnWidth(0, 150)
-		}
-		return
+		logError("Невідповідність заголовків (%d) та колонок (%d) для %s", len(headers), numCols, resType)
+		// Повертаємо nil, щоб уникнути паніки
+		return nil
 	}
 
 	maxWidths := make([]float32, numCols)
-	padding := float32(15) // Додатковий відступ
+	padding := float32(20) // Збільшимо відступ
 
-	// Проходимо по колонках
 	for col := 0; col < numCols; col++ {
-		// Вимірюємо заголовок
 		headerWidth := fyne.MeasureText(headers[col], theme.TextSize(), fyne.TextStyle{Bold: true}).Width
 		maxWidths[col] = headerWidth
 
-		// Проходимо по рядках, щоб знайти максимальну ширину вмісту
+		// Важливо! Розрахунок по всіх рядках може бути ДУЖЕ повільним.
+		// Розгляньте обмеження кількості рядків для розрахунку (напр., перші 100)
+		// Hoặc розрахунок лише по видимих рядках (складніше).
+		maxRowsToCheck := 100 // Обмеження для продуктивності
+		if numRows > maxRowsToCheck {
+			numRows = maxRowsToCheck
+		}
+
 		for row := 0; row < numRows; row++ {
 			cellData := formatCellData(resType, row, col) // Використовуємо хелпер
+			// Використовуємо той самий стиль/розмір, що й у CreateCell
 			cellWidth := fyne.MeasureText(cellData, theme.TextSize(), fyne.TextStyle{}).Width
 			if cellWidth > maxWidths[col] {
 				maxWidths[col] = cellWidth
 			}
 		}
-		// Додаємо відступ і встановлюємо ширину колонки
-		finalWidth := maxWidths[col] + padding
-		logDebug("Встановлення ширини колонки %d ('%s') = %.2f", col, headers[col], finalWidth)
-		table.SetColumnWidth(col, finalWidth)
+		maxWidths[col] += padding // Додаємо відступ
+		logDebug("Розрахована ширина колонки %d ('%s') = %.2f", col, headers[col], maxWidths[col])
 	}
-	logInfo("Автоматичне налаштування ширини колонок завершено для типу: %s", resType)
+	return maxWidths
 }
 
 // --- Оновлення UI віджетів Fyne ---
@@ -1029,32 +1021,17 @@ func loadSelectedResources() {
 	stateMu.RUnlock()
 	if clientset == nil {
 		logWarning("Спроба завантажити ресурси без clientset.")
-		if statusBar != nil {
-			fyne.Do(func() {
+		fyne.Do(func() {
+			if statusBar != nil {
 				statusBar.SetText("Не підключено.")
-			})
-		}
-		stateMu.Lock()
-		currentNodes = nil
-		currentNamespaces = nil
-		currentPods = nil
-		currentDeployments = nil
-		currentStatefulSets = nil
-		currentDaemonSets = nil
-		currentReplicaSets = nil
-		currentJobs = nil
-		currentCronJobs = nil
-		currentConfigMaps = nil
-		currentSecrets = nil
-		currentServices = nil
-		currentIngresses = nil
-		stateMu.Unlock()
-		displayResourceTableView()
-		updateUIWidgets()
+			}
+			displayResourceTableView()
+			updateUIWidgets()
+		})
 		return
 	}
 	logInfo("Завантаження ресурсів типу '%s' для '%s'", resType, contextName)
-	if statusBar != nil {
+	if fyne.CurrentApp() != nil && statusBar != nil {
 		fyne.Do(func() {
 			statusBar.SetText(fmt.Sprintf("Завантаження %s для '%s'...", resType, getDisplayName(contextName)))
 		})
@@ -1062,7 +1039,6 @@ func loadSelectedResources() {
 
 	var err error
 	var statusMsg string = "OK"
-	// Створюємо локальні змінні для результатів
 	newNodes := []corev1.Node{}
 	newNamespaces := []corev1.Namespace{}
 	newPods := []corev1.Pod{}
@@ -1076,20 +1052,11 @@ func loadSelectedResources() {
 	newSecrets := []corev1.Secret{}
 	newServices := []corev1.Service{}
 	newIngresses := []networkingv1.Ingress{}
-	newServiceAccounts := []corev1.ServiceAccount{}
-	newRoles := []rbacv1.Role{}
-	newRoleBindings := []rbacv1.RoleBinding{}
-	newClusterRoles := []rbacv1.ClusterRole{}
-	newClusterRoleBindings := []rbacv1.ClusterRoleBinding{}
-	// Storage
-	newPersistentVolumes := []corev1.PersistentVolume{}
-	newPersistentVolumeClaims := []corev1.PersistentVolumeClaim{}
-	newStorageClasses := []storagev1.StorageClass{}
 	newSystemWorkloads := []string{}
+
 	listOptions := metav1.ListOptions{}
 	ctxTimeout, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	// Очищуємо ВСІ глобальні списки перед заповненням одного
 	stateMu.Lock()
 	currentNodes = nil
 	currentNamespaces = nil
@@ -1104,6 +1071,7 @@ func loadSelectedResources() {
 	currentSecrets = nil
 	currentServices = nil
 	currentIngresses = nil
+	currentSystemWorkloads = nil
 	stateMu.Unlock()
 
 	switch resType {
@@ -1215,7 +1183,6 @@ func loadSelectedResources() {
 			newSecrets = list.Items
 			sort.Slice(newSecrets, func(i, j int) bool { return newSecrets[i].Name < newSecrets[j].Name })
 		}
-	// Services та Ingresses
 	case "Services":
 		logWarning("ЗАВАНТАЖЕННЯ ВСІХ SERVICES!")
 		list, listErr := clientset.CoreV1().Services("").List(ctxTimeout, listOptions)
@@ -1236,92 +1203,10 @@ func loadSelectedResources() {
 			newIngresses = list.Items
 			sort.Slice(newIngresses, func(i, j int) bool { return newIngresses[i].Name < newIngresses[j].Name })
 		}
-	case "ServiceAccounts":
-		logWarning("ЗАВАНТАЖЕННЯ ВСІХ SERVICEACCOUNTS!")
-		list, listErr := clientset.CoreV1().ServiceAccounts("").List(ctxTimeout, listOptions)
-		if listErr != nil {
-			err = listErr
-		} else {
-			logDebug("OK: %d ServiceAccounts", len(list.Items))
-			newServiceAccounts = list.Items
-			sort.Slice(newServiceAccounts, func(i, j int) bool { return newServiceAccounts[i].Name < newServiceAccounts[j].Name })
-		}
-	case "Roles":
-		logWarning("ЗАВАНТАЖЕННЯ ВСІХ ROLES!")
-		list, listErr := clientset.RbacV1().Roles("").List(ctxTimeout, listOptions)
-		if listErr != nil {
-			err = listErr
-		} else {
-			logDebug("OK: %d Roles", len(list.Items))
-			newRoles = list.Items
-			sort.Slice(newRoles, func(i, j int) bool { return newRoles[i].Name < newRoles[j].Name })
-		}
-	case "RoleBindings":
-		logWarning("ЗАВАНТАЖЕННЯ ВСІХ ROLEBINDINGS!")
-		list, listErr := clientset.RbacV1().RoleBindings("").List(ctxTimeout, listOptions)
-		if listErr != nil {
-			err = listErr
-		} else {
-			logDebug("OK: %d RoleBindings", len(list.Items))
-			newRoleBindings = list.Items
-			sort.Slice(newRoleBindings, func(i, j int) bool { return newRoleBindings[i].Name < newRoleBindings[j].Name })
-		}
-	case "ClusterRoles":
-		logWarning("ЗАВАНТАЖЕННЯ ВСІХ CLUSTERROLES!")
-		list, listErr := clientset.RbacV1().ClusterRoles().List(ctxTimeout, listOptions)
-		if listErr != nil {
-			err = listErr
-		} else {
-			logDebug("OK: %d ClusterRoles", len(list.Items))
-			newClusterRoles = list.Items
-			sort.Slice(newClusterRoles, func(i, j int) bool { return newClusterRoles[i].Name < newClusterRoles[j].Name })
-		}
-	case "ClusterRoleBindings":
-		logWarning("ЗАВАНТАЖЕННЯ ВСІХ CLUSTERROLEBINDINGS!")
-		list, listErr := clientset.RbacV1().ClusterRoleBindings().List(ctxTimeout, listOptions)
-		if listErr != nil {
-			err = listErr
-		} else {
-			logDebug("OK: %d ClusterRoleBindings", len(list.Items))
-			newClusterRoleBindings = list.Items
-			sort.Slice(newClusterRoleBindings, func(i, j int) bool { return newClusterRoleBindings[i].Name < newClusterRoleBindings[j].Name })
-		}
-	case "PersistentVolumes":
-		logWarning("ЗАВАНТАЖЕННЯ ВСІХ PERSISTENTVOLUMES!")
-		list, listErr := clientset.CoreV1().PersistentVolumes().List(ctxTimeout, listOptions)
-		if listErr != nil {
-			err = listErr
-		} else {
-			logDebug("OK: %d PersistentVolumes", len(list.Items))
-			newPersistentVolumes = list.Items
-			sort.Slice(newPersistentVolumes, func(i, j int) bool { return newPersistentVolumes[i].Name < newPersistentVolumes[j].Name })
-		}
-	case "PersistentVolumeClaims":
-		logWarning("ЗАВАНТАЖЕННЯ ВСІХ PERSISTENTVOLUMECLAIMS!")
-		list, listErr := clientset.CoreV1().PersistentVolumeClaims("").List(ctxTimeout, listOptions)
-		if listErr != nil {
-			err = listErr
-		} else {
-			logDebug("OK: %d PersistentVolumeClaims", len(list.Items))
-			newPersistentVolumeClaims = list.Items
-			sort.Slice(newPersistentVolumeClaims, func(i, j int) bool { return newPersistentVolumeClaims[i].Name < newPersistentVolumeClaims[j].Name })
-		}
-	case "StorageClasses":
-		logWarning("ЗАВАНТАЖЕННЯ ВСІХ STORAGECLASSES!")
-		list, listErr := clientset.StorageV1().StorageClasses().List(ctxTimeout, listOptions)
-		if listErr != nil {
-			err = listErr
-		} else {
-			logDebug("OK: %d StorageClasses", len(list.Items))
-			newStorageClasses = list.Items
-			sort.Slice(newStorageClasses, func(i, j int) bool { return newStorageClasses[i].Name < newStorageClasses[j].Name })
-		}
 	case "System Workloads":
 		logInfo("Завантаження системних компонентів з kube-system...")
 		workloadNamespace := "kube-system"
-		var combinedErr error // Збираємо помилки
-
-		// Deployments
+		var combinedErr error
 		depList, depErr := clientset.AppsV1().Deployments(workloadNamespace).List(ctxTimeout, listOptions)
 		if depErr != nil {
 			logError("Помилка List Deployments (%s): %v", workloadNamespace, depErr)
@@ -1331,7 +1216,6 @@ func loadSelectedResources() {
 				newSystemWorkloads = append(newSystemWorkloads, fmt.Sprintf("deploy/%s", item.Name))
 			}
 		}
-		// DaemonSets
 		dsList, dsErr := clientset.AppsV1().DaemonSets(workloadNamespace).List(ctxTimeout, listOptions)
 		if dsErr != nil {
 			logError("Помилка List DaemonSets (%s): %v", workloadNamespace, dsErr)
@@ -1341,7 +1225,6 @@ func loadSelectedResources() {
 				newSystemWorkloads = append(newSystemWorkloads, fmt.Sprintf("ds/%s", item.Name))
 			}
 		}
-		// StatefulSets
 		stsList, stsErr := clientset.AppsV1().StatefulSets(workloadNamespace).List(ctxTimeout, listOptions)
 		if stsErr != nil {
 			logError("Помилка List StatefulSets (%s): %v", workloadNamespace, stsErr)
@@ -1351,9 +1234,8 @@ func loadSelectedResources() {
 				newSystemWorkloads = append(newSystemWorkloads, fmt.Sprintf("sts/%s", item.Name))
 			}
 		}
-
 		sort.Strings(newSystemWorkloads)
-		err = combinedErr // Встановлюємо загальну помилку
+		err = combinedErr
 		if err != nil {
 			statusMsg = fmt.Sprintf("Помилка завантаження компонентів: %v", err)
 		}
@@ -1362,14 +1244,12 @@ func loadSelectedResources() {
 		err = fmt.Errorf("тип %s не підтримується", resType)
 	}
 
-	if err != nil {
-		logError("Помилка завантаження %s: %v", resType, err)
+	if err != nil && statusMsg == "OK" {
 		statusMsg = fmt.Sprintf("Помилка %s: %v", resType, err)
 	}
 
-	// Оновлюємо глобальний стан
 	stateMu.Lock()
-	switch resType { // Зберігаємо ТІЛЬКИ завантажений тип
+	switch resType {
 	case "Namespaces":
 		currentNamespaces = newNamespaces
 	case "Nodes":
@@ -1396,78 +1276,63 @@ func loadSelectedResources() {
 		currentServices = newServices
 	case "Ingresses":
 		currentIngresses = newIngresses
-	case "ServiceAccounts":
-		currentServiceAccounts = newServiceAccounts
-	case "Roles":
-		currentRoles = newRoles
-	case "RoleBindings":
-		currentRoleBindings = newRoleBindings
-	case "ClusterRoles":
-		currentClusterRoles = newClusterRoles
-	case "ClusterRoleBindings":
-		currentClusterRoleBindings = newClusterRoleBindings
-	case "PersistentVolumes":
-		currentPersistentVolumes = newPersistentVolumes
-	case "PersistentVolumeClaims":
-		currentPersistentVolumeClaims = newPersistentVolumeClaims
-	case "StorageClasses":
-		currentStorageClasses = newStorageClasses
 	case "System Workloads":
 		currentSystemWorkloads = newSystemWorkloads
 	}
 	stateMu.Unlock()
 
-	// Оновлюємо статус бар
-	if statusBar != nil {
-		if err == nil {
-			count := 0
-			switch resType {
-			case "Namespaces":
-				count = len(newNamespaces)
-			case "Nodes":
-				count = len(newNodes)
-			case "Pods":
-				count = len(newPods)
-			case "Deployments":
-				count = len(newDeployments)
-			case "StatefulSets":
-				count = len(newStatefulSets)
-			case "DaemonSets":
-				count = len(newDaemonSets)
-			case "ReplicaSets":
-				count = len(newReplicaSets)
-			case "Jobs":
-				count = len(newJobs)
-			case "CronJobs":
-				count = len(newCronJobs)
-			case "ConfigMaps":
-				count = len(newConfigMaps)
-			case "Secrets":
-				count = len(newSecrets)
-			case "Services":
-				count = len(newServices)
-			case "Ingresses":
-				count = len(newIngresses)
-			case "System Workloads":
-				count = len(newSystemWorkloads)
-			}
-			statusMsg = fmt.Sprintf("Підключено: %s | %s: %d", getDisplayName(contextName), resType, count)
-		}
+	var calculatedWidths []float32
+	if err == nil {
+		calculatedWidths = calculateColumnWidths(resType)
+	}
+
+	app := fyne.CurrentApp()
+	if app != nil {
 		fyne.Do(func() {
-			statusBar.SetText(statusMsg)
+			updateTableLayout(resType, calculatedWidths)
+			if statusBar != nil {
+				finalStatusMsg := statusMsg
+				if err == nil {
+					count := 0
+					stateMu.RLock()
+					switch resType {
+					case "Namespaces":
+						count = len(currentNamespaces)
+					case "Nodes":
+						count = len(currentNodes)
+					case "Pods":
+						count = len(currentPods)
+					case "Deployments":
+						count = len(currentDeployments)
+					case "StatefulSets":
+						count = len(currentStatefulSets)
+					case "DaemonSets":
+						count = len(currentDaemonSets)
+					case "ReplicaSets":
+						count = len(currentReplicaSets)
+					case "Jobs":
+						count = len(currentJobs)
+					case "CronJobs":
+						count = len(currentCronJobs)
+					case "ConfigMaps":
+						count = len(currentConfigMaps)
+					case "Secrets":
+						count = len(currentSecrets)
+					case "Services":
+						count = len(currentServices)
+					case "Ingresses":
+						count = len(currentIngresses)
+					case "System Workloads":
+						count = len(currentSystemWorkloads)
+					}
+					stateMu.RUnlock()
+					finalStatusMsg = fmt.Sprintf("Підключено: %s | %s: %d", getDisplayName(contextName), resType, count)
+				}
+				statusBar.SetText(finalStatusMsg)
+			}
+			updateUIWidgets() // Викликаємо загальне оновлення в кінці
 		})
 	}
-	// --- РОЗРАХУНОК ТА ВСТАНОВЛЕННЯ ШИРИНИ КОЛОНОК ---
-	// Робимо це після оновлення даних, але до оновлення UI,
-	// бо SetColumnWidth може викликати Refresh таблиці.
-	// Викликаємо НЕ в горутині, бо нам потрібні актуальні дані.
-	if err == nil { // Розраховуємо ширину тільки якщо не було помилки завантаження
-		autoResizeTableColumns(resourceTable) // <<<--- ДОДАНО ВИКЛИК
-	}
-	fyne.Do(func() {
-		displayResourceTableView()
-		updateUIWidgets()
-	})
 	logInfo("Завантаження '%s' завершено.", resType)
 }
 
@@ -1553,81 +1418,93 @@ func connectLoadAndRefresh(ctxName string) {
 	}
 }
 
-// --- Додано функцію для побудови заголовка таблиці ---
-func buildTableHeader(resourceType string) fyne.CanvasObject {
-	var headers []string
-	switch resourceType {
-	case "Namespaces":
-		headers = []string{"Name", "Status", "Age"}
-	case "Nodes":
-		headers = []string{"Name", "Status", "Roles", "Version"}
-	case "Pods":
-		headers = []string{"Name", "Namespace", "Ready", "Restarts", "Controlled By", "Node", "QoS", "Age", "Status"}
-	case "Deployments":
-		headers = []string{"Name", "Namespace", "Ready", "Age"}
-	case "StatefulSets":
-		headers = []string{"Name", "Namespace", "Ready", "Age"}
-	case "DaemonSets":
-		headers = []string{"Name", "Namespace", "Desired", "Current", "Ready"} // Removed Age due to col count mismatch
-	case "ReplicaSets":
-		headers = []string{"Name", "Namespace", "Desired", "Current", "Ready"}
-	case "Jobs":
-		headers = []string{"Name", "Namespace", "Completions", "Age"}
-	case "CronJobs":
-		headers = []string{"Name", "Namespace", "Schedule", "Suspend", "Last Schedule"}
-	case "ConfigMaps":
-		headers = []string{"Name", "Namespace", "Data Keys"}
-	case "Secrets":
-		headers = []string{"Name", "Namespace", "Type", "Data Keys"}
-	case "Services":
-		headers = []string{"Name", "Namespace", "Type", "ClusterIP", "Ports"}
-	case "Ingresses":
-		headers = []string{"Name", "Namespace", "Class", "Hosts"}
-	case "System Workloads":
-		headers = []string{"Component (in kube-system)"}
-	default:
-		headers = []string{"Name"} // Fallback
+// Створює віджет заголовка таблиці з заданою шириною колонок
+func buildTableHeader(resType string, colWidths []float32) fyne.CanvasObject {
+	headers := getHeadersForType(resType)
+	if len(headers) == 0 || len(colWidths) != len(headers) {
+		// Повертаємо простий заголовок за замовчуванням або порожній контейнер
+		logWarning("Не вдалося створити заголовок: невідповідність колонок/ширин для %s", resType)
+		return container.NewHBox(widget.NewLabelWithStyle("Name", fyne.TextAlignLeading, fyne.TextStyle{Bold: true})) // Default
 	}
 
 	headerWidgets := []fyne.CanvasObject{}
 	for _, h := range headers {
-		headerWidgets = append(headerWidgets, widget.NewLabelWithStyle(h, fyne.TextAlignLeading, fyne.TextStyle{Bold: true}))
+		label := widget.NewLabelWithStyle(h, fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
+		// Встановлюємо мінімальну ширину для кожної мітки заголовка
+		// label.min = fyne.NewSize(colWidths[i], 0) // MinSize - це не те, що нам треба
+		// Ми не можемо напряму встановити ширину віджета в Grid.
+		// Замість цього, будемо покладатися на те, що таблиця нижче
+		// "розтягне" Grid за допомогою SetColumnWidth.
+		// Але для HBox можна спробувати так:
+		// hboxCell := container.NewPadded(label) // Додаємо відступи
+		// hboxCell.Resize(fyne.NewSize(colWidths[i], hboxCell.MinSize().Height)) // Спроба встановити розмір - може не спрацювати ідеально з HBox
+		headerWidgets = append(headerWidgets, label) // Додаємо мітку
 	}
-	// Можливо, додати Spacer, щоб розтягнути колонки? Або налаштувати ширину пізніше.
-	// return container.NewGridWithColumns(len(headers), headerWidgets...) // Grid може бути кращим для вирівнювання
-	return container.NewPadded(container.NewHBox(headerWidgets...)) // Padded HBox для початку
+
+	// Використання HBox може не дати точного вирівнювання з колонками таблиці,
+	// якщо сумарна ширина перевищує доступну. Grid - кращий варіант,
+	// але SetColumnWidth налаштовує саму таблицю, а не зовнішній віджет.
+	// Пробуємо повернути HBox з мітками - можливо, таблиця вплине на його рендеринг.
+	return container.NewPadded(container.NewHBox(headerWidgets...))
 }
 
-// --- Функції для перемикання вмісту правої панелі ---
+// Оновлює ширину колонок таблиці та її заголовок
+func updateTableLayout(resType string, colWidths []float32) {
+	if resourceTable == nil {
+		return
+	}
+
+	if colWidths != nil {
+		// Встановлюємо розраховану ширину для колонок самої таблиці
+		logDebug("Встановлення ширини колонок таблиці...")
+		for col, width := range colWidths {
+			resourceTable.SetColumnWidth(col, width)
+		}
+	} else {
+		// Якщо ширини не розраховано (помилка або немає даних),
+		// можна скинути ширину до стандартної або нічого не робити.
+		// Скидання може викликати стрибок розміру.
+		// Поки що нічого не робимо.
+		logDebug("Ширини колонок не розраховано, SetColumnWidth не викликається.")
+	}
+
+	// Оновлюємо/перестворюємо віджет заголовка
+	newHeader := buildTableHeader(resType, colWidths)
+	resourceTableHeader = newHeader // Зберігаємо новий заголовок глобально
+
+	// Оновлюємо контейнер правої панелі, щоб показати таблицю з (можливо) новим заголовком
+	displayResourceTableView() // Ця функція тепер використає оновлений resourceTableHeader
+}
+
+// Показує таблицю ресурсів з поточним заголовком
 func displayResourceTableView() {
 	logDebug("Показ таблиці ресурсів")
 
-	stateMu.RLock()
-	resType := selectedResourceType // Потрібен для створення заголовка
-	stateMu.RUnlock()
-
-	// Динамічно створюємо/оновлюємо заголовок таблиці
-	header := buildTableHeader(resType)
-	// Переконуємося, що таблиця існує
-	if resourceTable == nil {
-		logError("resourceTable є nil при спробі показу таблиці!")
-		return
+	// Переконуємося, що глобальний заголовок існує
+	if resourceTableHeader == nil {
+		logWarning("Спроба показати таблицю, але resourceTableHeader є nil. Створюємо стандартний.")
+		// Створюємо простий заголовок, якщо його немає
+		stateMu.RLock()
+		resType := selectedResourceType
+		stateMu.RUnlock()
+		resourceTableHeader = buildTableHeader(resType, nil) // nil для ширин означатиме стандартний
 	}
-	// Створюємо контейнер для таблиці та її заголовка
-	tableContainer := container.NewBorder(header, nil, nil, nil, resourceTable)
 
-	if rightPanelContainer != nil {
+	// Створюємо/оновлюємо контейнер для таблиці та її заголовка
+	tableContainer := container.NewBorder(resourceTableHeader, nil, nil, nil, resourceTable)
+
+	if rightPanelContainer != nil && resourceTable != nil {
 		resourceTable.Refresh() // Оновлюємо дані таблиці
-		// Встановлюємо контейнер таблиці як вміст правої панелі
+		// Встановлюємо tableContainer як вміст правої панелі
 		if len(rightPanelContainer.Objects) == 0 || rightPanelContainer.Objects[0] != tableContainer {
 			rightPanelContainer.Objects = []fyne.CanvasObject{tableContainer}
 		} else {
-			// Якщо контейнер вже там, просто оновлюємо його (заголовок міг змінитися)
+			// Якщо це вже контейнер таблиці, оновлюємо його (змінився заголовок або таблиця)
 			rightPanelContainer.Objects[0] = tableContainer
 		}
 		rightPanelContainer.Refresh()
 	} else {
-		logError("rightPanelContainer є nil при показі таблиці")
+		logError("rightPanelContainer або resourceTable є nil при показі таблиці")
 	}
 }
 
@@ -2598,15 +2475,15 @@ func main() {
 	logInfo("Версія Go: %s", runtime.Version())
 
 	initializeLoadingRules()
-	setupFileWatcher() // Повернули запуск watcher
+	setupFileWatcher()
 
-	fyneApp = app.New()
+	fyneApp = app.NewWithID(appID)
 	mainWindow = fyneApp.NewWindow(appTitle)
 	selectedResourceType = "Nodes"
 
 	resIconPng := fyne.NewStaticResource("icon.png", iconData)
 	if len(iconData) == 0 {
-		logWarning("Дані іконки для трея порожні! Перевірте наявність icon.png та директиву //go:embed.")
+		logWarning("Дані іконки для трея порожні!")
 		resIconPng = nil
 	}
 	if drv, ok := fyneApp.(desktop.App); ok {
@@ -2614,7 +2491,7 @@ func main() {
 		if resIconPng != nil {
 			desktopApp.SetSystemTrayIcon(resIconPng)
 		} else {
-			logWarning("Не вдалося встановити іконку трея: ресурс порожній.")
+			logWarning("Не вдалося встановити іконку трея.")
 		}
 		trayMenu = buildContextMenu()
 		desktopApp.SetSystemTrayMenu(trayMenu)
@@ -2773,7 +2650,7 @@ func main() {
 			}
 			logDebug("Table Length: Rows=%d, Cols=%d for Type=%s", rows, cols, selectedResourceType)
 			return rows, cols
-		}, // Виправлено logTrace на logDebug
+		},
 		func() fyne.CanvasObject {
 			l := widget.NewLabel("Template")
 			l.Truncation = fyne.TextTruncateEllipsis
@@ -2930,8 +2807,7 @@ func main() {
 
 	leftPanelContent := container.NewVSplit(container.NewBorder(container.NewPadded(widget.NewLabel("Контексти:")), nil, nil, nil, contextListWidget), container.NewBorder(container.NewPadded(widget.NewLabel("Ресурси:")), nil, nil, nil, resourceTypeTree))
 	leftPanelContent.Offset = 0.5
-	// Замість статичного заголовка використовуємо контейнер, який буде оновлюватись
-	resourceTableHeader := container.NewHBox(widget.NewLabelWithStyle("Завантаження...", fyne.TextAlignLeading, fyne.TextStyle{Bold: true})) // Початковий заголовок
+	resourceTableHeader = buildTableHeader(selectedResourceType, nil)
 	resourceTableContainer := container.NewBorder(resourceTableHeader, nil, nil, nil, resourceTable)
 	rightPanelContainer = container.NewMax(resourceTableContainer)
 	tappableRightPanel := &tappableContainer{content: rightPanelContainer}
@@ -2943,7 +2819,7 @@ func main() {
 
 	mainWindow.Resize(fyne.NewSize(1024, 768))
 	mainWindow.CenterOnScreen()
-	mainWindow.SetCloseIntercept(func() { logInfo("Закриття вікна..."); stopFileWatcher(); fyneApp.Quit() }) // Повернули stopFileWatcher
+	mainWindow.SetCloseIntercept(func() { logInfo("Закриття вікна..."); stopFileWatcher(); fyneApp.Quit() })
 
 	go loadAndUpdateState()
 	mainWindow.ShowAndRun()
