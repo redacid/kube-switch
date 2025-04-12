@@ -47,20 +47,11 @@ var _ embed.FS
 const enableDebugLogging = true
 const logPrefix = "GoKubeLens(Step8-Network)" // Оновлено префікс
 const maxContextItems = 50
-
 const labelLoading = "Завантаження..."
 const labelError = "Помилка"
 const labelNoContext = "Немає контексту"
 const labelBackToList = "<- Назад до списку"
 const appTitle = "Go Kube Manager (Lens Clone) - Step 8"
-
-// Мапи для дерева ресурсів
-type resourceTreeNodeID = string
-
-var resourceTreeData = map[resourceTreeNodeID][]resourceTreeNodeID{"": {"Cluster", "Workloads", "Network", "Storage", "Configuration", "Access Control"}, "Cluster": {"Namespaces", "Nodes"}, "Workloads": {"Pods", "Deployments", "StatefulSets", "DaemonSets", "ReplicaSets", "Jobs", "CronJobs"}, "Network": {"Services", "Ingresses"}, "Storage": {"PersistentVolumes", "PersistentVolumeClaims", "StorageClasses"}, "Configuration": {"ConfigMaps", "Secrets"}, "Access Control": {"ServiceAccounts", "Roles", "RoleBindings", "ClusterRoles", "ClusterRoleBindings"}}
-var resourceLeafNodes = map[resourceTreeNodeID]bool{"Namespaces": true, "Nodes": true, "Pods": true, "Deployments": true, "StatefulSets": true, "DaemonSets": true, "ReplicaSets": true, "Jobs": true, "CronJobs": true, "Services": true, "Ingresses": true, "PersistentVolumes": true, "PersistentVolumeClaims": true, "StorageClasses": true, "ConfigMaps": true, "Secrets": true, "ServiceAccounts": true, "Roles": true, "RoleBindings": true, "ClusterRoles": true, "ClusterRoleBindings": true}
-
-var arnRegex = regexp.MustCompile(`^arn:aws:eks:[^:]+:(\d+):cluster/(.+)$`)
 
 var (
 	fyneApp             fyne.App
@@ -73,6 +64,10 @@ var (
 	statusBar           *widget.Label
 	desktopApp          desktop.App
 	trayMenu            *fyne.Menu
+
+	resourceTreeData  = map[resourceTreeNodeID][]resourceTreeNodeID{"": {"Cluster", "Workloads", "Network", "Storage", "Configuration", "Access Control"}, "Cluster": {"Namespaces", "Nodes"}, "Workloads": {"Pods", "Deployments", "StatefulSets", "DaemonSets", "ReplicaSets", "Jobs", "CronJobs"}, "Network": {"Services", "Ingresses"}, "Storage": {"PersistentVolumes", "PersistentVolumeClaims", "StorageClasses"}, "Configuration": {"ConfigMaps", "Secrets"}, "Access Control": {"ServiceAccounts", "Roles", "RoleBindings", "ClusterRoles", "ClusterRoleBindings"}}
+	resourceLeafNodes = map[resourceTreeNodeID]bool{"Namespaces": true, "Nodes": true, "Pods": true, "Deployments": true, "StatefulSets": true, "DaemonSets": true, "ReplicaSets": true, "Jobs": true, "CronJobs": true, "Services": true, "Ingresses": true, "PersistentVolumes": true, "PersistentVolumeClaims": true, "StorageClasses": true, "ConfigMaps": true, "Secrets": true, "ServiceAccounts": true, "Roles": true, "RoleBindings": true, "ClusterRoles": true, "ClusterRoleBindings": true}
+	arnRegex          = regexp.MustCompile(`^arn:aws:eks:[^:]+:(\d+):cluster/(.+)$`)
 
 	currentContextName   string
 	connectedContextName string
@@ -110,6 +105,22 @@ var (
 	stateMu            sync.RWMutex
 )
 
+// Мапи для дерева ресурсів
+type resourceTreeNodeID = string
+type tappableContainer struct {
+	widget.BaseWidget
+	content fyne.CanvasObject
+}
+
+func (t *tappableContainer) CreateRenderer() fyne.WidgetRenderer {
+	return widget.NewSimpleRenderer(t.content)
+}
+func (t *tappableContainer) TappedSecondary(ev *fyne.PointEvent) {
+	logDebug("Правий клік на контейнері")
+	showWindowContextMenu(ev.AbsolutePosition)
+}
+func (t *tappableContainer) MinSize() fyne.Size { return t.content.MinSize() }
+
 func logDebug(format string, v ...interface{}) {
 	if enableDebugLogging {
 		log.Printf(logPrefix+" [DEBUG]: "+format, v...)
@@ -120,7 +131,6 @@ func logWarning(format string, v ...interface{}) { log.Printf(logPrefix+" [WARN]
 func logError(format string, v ...interface{})   { log.Printf(logPrefix+" [ERROR]: "+format, v...) }
 
 // --- Робота з Kubeconfig (clientcmd) ---
-// (Без змін)
 func loadKubeConfig() (*api.Config, string, error) {
 	stateMu.RLock()
 	rules := loadingRules
@@ -201,7 +211,6 @@ func switchContext(contextName string) error {
 }
 
 // --- Підключення до кластера ---
-// (Без змін)
 func connectToCluster(contextName string) (*kubernetes.Clientset, string, error) {
 	logInfo("Спроба підключення до: %s", contextName)
 	if statusBar != nil {
@@ -900,7 +909,6 @@ func connectLoadAndRefresh(ctxName string) {
 }
 
 // --- Функції для перемикання вмісту правої панелі ---
-// (Без змін)
 func displayResourceList() {
 	logDebug("Показ списку ресурсів")
 	if rightPanelContainer != nil && resourceListWidget != nil {
@@ -915,7 +923,6 @@ func displayResourceList() {
 }
 
 // --- Функції для показу деталей ресурсів ---
-// (createDetailRow, buildNodeDetailsView, buildPodDetailsView, buildNamespaceDetailsView, ..., buildCronJobDetailsView, buildConfigMapDetailsView, buildSecretDetailsView - без змін)
 func createDetailRow(key string, value string) *fyne.Container {
 	keyLabel := widget.NewLabelWithStyle(key+":", fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
 	if value == "" {
@@ -1106,7 +1113,6 @@ func buildJobDetailsView(job batchv1.Job) fyne.CanvasObject {
 	if job.Spec.Parallelism != nil {
 		parallelism = fmt.Sprintf("%d", *job.Spec.Parallelism)
 	}
-	// Додаємо пропущений рядок:
 	detailsVBox.Add(createDetailRow("Parallelism", parallelism))
 	detailsVBox.Add(createDetailRow("Status", fmt.Sprintf("%d active, %d succeeded, %d failed", job.Status.Active, job.Status.Succeeded, job.Status.Failed)))
 	// TODO: Додати більше полів - Conditions, Template...
@@ -1511,19 +1517,90 @@ func showWindowContextMenu(pos fyne.Position) {
 	}
 }
 
-type tappableContainer struct {
-	widget.BaseWidget
-	content fyne.CanvasObject
-}
+// --- Універсальна функція-диспетчер для показу деталей ---
+func displayResourceDetails(resType string, resource interface{}) {
+	var detailWidget fyne.CanvasObject
+	resourceName := "?" // Ім'я за замовчуванням для заглушки
 
-func (t *tappableContainer) CreateRenderer() fyne.WidgetRenderer {
-	return widget.NewSimpleRenderer(t.content)
+	// Використовуємо type assertion для виклику відповідної функції build...
+	switch data := resource.(type) {
+	case corev1.Namespace:
+		detailWidget = buildNamespaceDetailsView(data)
+		resourceName = data.Name
+	case corev1.Node:
+		detailWidget = buildNodeDetailsView(data)
+		resourceName = data.Name
+	case corev1.Pod:
+		detailWidget = buildPodDetailsView(data)
+		resourceName = data.Name
+	case appsv1.Deployment:
+		detailWidget = buildDeploymentDetailsView(data)
+		resourceName = data.Name
+	case appsv1.StatefulSet:
+		detailWidget = buildStatefulSetDetailsView(data)
+		resourceName = data.Name
+	case appsv1.DaemonSet:
+		detailWidget = buildDaemonSetDetailsView(data)
+		resourceName = data.Name
+	case appsv1.ReplicaSet:
+		detailWidget = buildReplicaSetDetailsView(data)
+		resourceName = data.Name
+	case batchv1.Job:
+		detailWidget = buildJobDetailsView(data)
+		resourceName = data.Name
+	case batchv1.CronJob:
+		detailWidget = buildCronJobDetailsView(data)
+		resourceName = data.Name
+	case corev1.ConfigMap:
+		detailWidget = buildConfigMapDetailsView(data)
+		resourceName = data.Name
+	case corev1.Secret:
+		detailWidget = buildSecretDetailsView(data)
+		resourceName = data.Name
+	case corev1.Service:
+		detailWidget = buildServiceDetailsView(data)
+		resourceName = data.Name
+	case networkingv1.Ingress:
+		detailWidget = buildIngressDetailsView(data)
+		resourceName = data.Name
+	case corev1.ServiceAccount:
+		detailWidget = buildServiceAccountDetailsView(data)
+		resourceName = data.Name
+	case rbacv1.Role:
+		detailWidget = buildRoleDetailsView(data)
+		resourceName = data.Name
+	case rbacv1.RoleBinding:
+		detailWidget = buildRoleBindingDetailsView(data)
+		resourceName = data.Name
+	case rbacv1.ClusterRole:
+		detailWidget = buildClusterRoleDetailsView(data)
+		resourceName = data.Name
+	case rbacv1.ClusterRoleBinding:
+		detailWidget = buildClusterRoleBindingDetailsView(data)
+		resourceName = data.Name
+	case corev1.PersistentVolume:
+		detailWidget = buildPersistentVolumeDetailsView(data)
+		resourceName = data.Name
+	case corev1.PersistentVolumeClaim:
+		detailWidget = buildPersistentVolumeClaimDetailsView(data)
+		resourceName = data.Name
+	case storagev1.StorageClass:
+		detailWidget = buildStorageClassDetailsView(data)
+		resourceName = data.Name
+	default:
+		logWarning("Немає функції деталей для типу %T", resource)
+		detailWidget = buildNotImplementedDetailsView(resType, resourceName)
+	}
+
+	// Оновлюємо праву панель
+	if rightPanelContainer != nil && detailWidget != nil {
+		logDebug("Перемикання правої панелі на деталі для %s", resourceName)
+		rightPanelContainer.Objects = []fyne.CanvasObject{detailWidget}
+		rightPanelContainer.Refresh()
+	} else {
+		logError("Помилка при оновленні правої панелі для деталей %s", resourceName)
+	}
 }
-func (t *tappableContainer) TappedSecondary(ev *fyne.PointEvent) {
-	logDebug("Правий клік на контейнері")
-	showWindowContextMenu(ev.AbsolutePosition)
-}
-func (t *tappableContainer) MinSize() fyne.Size { return t.content.MinSize() }
 
 // --- Головна функція та запуск Fyne ---
 func main() {
@@ -1535,9 +1612,6 @@ func main() {
 	fyneApp = app.New()
 	mainWindow = fyneApp.NewWindow(appTitle)
 	selectedResourceType = "Nodes"
-
-	// --- Налаштування трея (закоментовано) ---
-	// ...
 
 	// --- Створюємо UI елементи ---
 	currentContextLabel = widget.NewLabel(labelLoading)
@@ -1679,7 +1753,7 @@ func main() {
 			default:
 				return 0
 			}
-		}, // Оновлено Length
+		},
 		func() fyne.CanvasObject { return widget.NewLabel("template resource") },
 		func(id widget.ListItemID, item fyne.CanvasObject) {
 			stateMu.RLock()
@@ -1779,9 +1853,8 @@ func main() {
 			}
 			stateMu.RUnlock()
 			item.(*widget.Label).SetText(name)
-		}, // Оновлено UpdateItem
+		},
 	)
-	// Оновлено OnSelected для виклику нових функцій деталей
 	resourceListWidget.OnSelected = func(id widget.ListItemID) {
 		stateMu.RLock()
 		resType := selectedResourceType
@@ -1921,7 +1994,7 @@ func main() {
 	// --- Збираємо макет вікна ---
 	leftPanelContent := container.NewVSplit(container.NewBorder(container.NewPadded(widget.NewLabel("Контексти:")), nil, nil, nil, contextListWidget), container.NewBorder(container.NewPadded(widget.NewLabel("Ресурси:")), nil, nil, nil, resourceTypeTree))
 	leftPanelContent.Offset = 0.5
-	rightPanelContainer = container.NewMax(resourceListWidget)
+	rightPanelContainer = container.NewStack(resourceListWidget)
 	tappableRightPanel := &tappableContainer{content: rightPanelContainer}
 	tappableRightPanel.ExtendBaseWidget(tappableRightPanel)
 	split := container.NewHSplit(leftPanelContent, tappableRightPanel)
@@ -1936,89 +2009,4 @@ func main() {
 	go loadAndUpdateState()
 	mainWindow.ShowAndRun()
 	logInfo(logPrefix + " завершено.")
-}
-
-// --- Універсальна функція-диспетчер для показу деталей ---
-func displayResourceDetails(resType string, resource interface{}) {
-	var detailWidget fyne.CanvasObject
-	resourceName := "?" // Ім'я за замовчуванням для заглушки
-
-	// Використовуємо type assertion для виклику відповідної функції build...
-	switch data := resource.(type) {
-	case corev1.Namespace:
-		detailWidget = buildNamespaceDetailsView(data)
-		resourceName = data.Name
-	case corev1.Node:
-		detailWidget = buildNodeDetailsView(data)
-		resourceName = data.Name
-	case corev1.Pod:
-		detailWidget = buildPodDetailsView(data)
-		resourceName = data.Name
-	case appsv1.Deployment:
-		detailWidget = buildDeploymentDetailsView(data)
-		resourceName = data.Name
-	case appsv1.StatefulSet:
-		detailWidget = buildStatefulSetDetailsView(data)
-		resourceName = data.Name
-	case appsv1.DaemonSet:
-		detailWidget = buildDaemonSetDetailsView(data)
-		resourceName = data.Name
-	case appsv1.ReplicaSet:
-		detailWidget = buildReplicaSetDetailsView(data)
-		resourceName = data.Name
-	case batchv1.Job:
-		detailWidget = buildJobDetailsView(data)
-		resourceName = data.Name
-	case batchv1.CronJob:
-		detailWidget = buildCronJobDetailsView(data)
-		resourceName = data.Name
-	case corev1.ConfigMap:
-		detailWidget = buildConfigMapDetailsView(data)
-		resourceName = data.Name
-	case corev1.Secret:
-		detailWidget = buildSecretDetailsView(data)
-		resourceName = data.Name
-	case corev1.Service:
-		detailWidget = buildServiceDetailsView(data)
-		resourceName = data.Name
-	case networkingv1.Ingress:
-		detailWidget = buildIngressDetailsView(data)
-		resourceName = data.Name
-	case corev1.ServiceAccount:
-		detailWidget = buildServiceAccountDetailsView(data)
-		resourceName = data.Name
-	case rbacv1.Role:
-		detailWidget = buildRoleDetailsView(data)
-		resourceName = data.Name
-	case rbacv1.RoleBinding:
-		detailWidget = buildRoleBindingDetailsView(data)
-		resourceName = data.Name
-	case rbacv1.ClusterRole:
-		detailWidget = buildClusterRoleDetailsView(data)
-		resourceName = data.Name
-	case rbacv1.ClusterRoleBinding:
-		detailWidget = buildClusterRoleBindingDetailsView(data)
-		resourceName = data.Name
-	case corev1.PersistentVolume:
-		detailWidget = buildPersistentVolumeDetailsView(data)
-		resourceName = data.Name
-	case corev1.PersistentVolumeClaim:
-		detailWidget = buildPersistentVolumeClaimDetailsView(data)
-		resourceName = data.Name
-	case storagev1.StorageClass:
-		detailWidget = buildStorageClassDetailsView(data)
-		resourceName = data.Name
-	default:
-		logWarning("Немає функції деталей для типу %T", resource)
-		detailWidget = buildNotImplementedDetailsView(resType, resourceName)
-	}
-
-	// Оновлюємо праву панель
-	if rightPanelContainer != nil && detailWidget != nil {
-		logDebug("Перемикання правої панелі на деталі для %s", resourceName)
-		rightPanelContainer.Objects = []fyne.CanvasObject{detailWidget}
-		rightPanelContainer.Refresh()
-	} else {
-		logError("Помилка при оновленні правої панелі для деталей %s", resourceName)
-	}
 }
