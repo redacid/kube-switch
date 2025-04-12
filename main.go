@@ -881,18 +881,39 @@ func loadSelectedResources() {
 	logInfo("Завантаження '%s' завершено.", resType)
 }
 
-// Обгортка для підключення та початкового завантаження ресурсів
-func connectLoadAndRefresh(ctxName string) {
-	displayResourceList()
+// Показує порожню заглушку або інструкцію
+func displayEmptyOverview() {
+	logDebug("Показ порожньої правої панелі")
+	if rightPanelContainer != nil {
+		// Створюємо новий центральний контейнер, щоб він не був nil
+		// якщо раніше там був список
+		placeholder := container.NewCenter(widget.NewLabel("Виберіть контекст та тип ресурсу"))
+		// Переконуємося, що об'єкти оновлюються
+		rightPanelContainer.Objects = []fyne.CanvasObject{placeholder}
+		rightPanelContainer.Refresh()
+	} else {
+		logError("rightPanelContainer є nil при показі порожньої панелі")
+	}
+	// Також оновлюємо resourceListWidget, щоб він був порожнім
 	if resourceListWidget != nil {
 		resourceListWidget.Refresh()
 	}
-	clientset, _, err := connectToCluster(ctxName)
+}
+
+// Обгортка для підключення та початкового відображення огляду кластера
+func connectLoadAndRefresh(ctxName string) {
+	// Одразу показуємо порожню праву панель або заглушку
+	displayEmptyOverview() // Нова функція, щоб очистити праву панель
+
+	clientset, serverVersion, err := connectToCluster(ctxName) // Підключення та перевірка версії
+
 	stateMu.Lock()
 	if err == nil {
+		// Успішне підключення
 		connectedContextName = ctxName
 		currentClientset = clientset
-		selectedResourceType = "Nodes"
+		selectedResourceType = "" // НЕ вибираємо тип ресурсу за замовчуванням
+		// Очищуємо ВСІ списки ресурсів при підключенні до нового кластера
 		currentNodes = nil
 		currentNamespaces = nil
 		currentPods = nil
@@ -906,10 +927,14 @@ func connectLoadAndRefresh(ctxName string) {
 		currentSecrets = nil
 		currentServices = nil
 		currentIngresses = nil
-		logDebug("Збережено clientset: %s, вибрано тип: %s", ctxName, selectedResourceType)
+		logDebug("Збережено clientset: %s. Очікування вибору типу ресурсу.", ctxName)
 		stateMu.Unlock()
-		go loadSelectedResources()
+		// НЕ запускаємо loadSelectedResources автоматично
+		// Замість цього показуємо огляд кластера
+		go displayClusterOverview(serverVersion) // Запускаємо показ огляду
+		updateUIWidgets()                        // Оновлюємо UI (статус, виділення контексту/дерева)
 	} else {
+		// Помилка підключення
 		connectedContextName = ""
 		currentClientset = nil
 		selectedResourceType = ""
@@ -928,8 +953,8 @@ func connectLoadAndRefresh(ctxName string) {
 		currentIngresses = nil
 		logDebug("Помилка підключення.")
 		stateMu.Unlock()
-		displayResourceList()
-		updateUIWidgets()
+		displayEmptyOverview() // Показуємо порожню панель при помилці
+		updateUIWidgets()      // Оновлюємо UI (статус помилки)
 	}
 }
 
@@ -1775,6 +1800,40 @@ func displayResourceDetails(resType string, resource interface{}) {
 	} else {
 		logError("Помилка при оновленні правої панелі для деталей %s", resourceName)
 	}
+}
+
+// Показує огляд кластера (поки що лише версію)
+func displayClusterOverview(serverVersion string) {
+	logDebug("Показ огляду кластера")
+	if rightPanelContainer == nil {
+		logError("rightPanelContainer є nil при показі огляду")
+		return
+	}
+
+	detailsVBox := container.NewVBox(
+		widget.NewLabelWithStyle("Cluster Overview", fyne.TextAlignCenter, fyne.TextStyle{Bold: true}),
+		widget.NewSeparator(),
+	)
+	// Додаємо рядок з версією
+	detailsVBox.Add(createDetailRow("Server Version", serverVersion))
+	// TODO: В майбутньому можна додати сюди запити кількості Nodes, Namespaces тощо
+
+	// Використовуємо Padded контейнер для кращого вигляду
+	overviewContent := container.NewPadded(detailsVBox)
+
+	rightPanelContainer.Objects = []fyne.CanvasObject{overviewContent}
+	rightPanelContainer.Refresh()
+
+	// Оновлюємо статус бар (повідомлення про підключення вже встановлено в connectToCluster)
+	// Можна додати інструкцію
+	stateMu.RLock()
+	ctxListLen := len(allContextNames)
+	connCtx := connectedContextName
+	stateMu.RUnlock()
+	if statusBar != nil {
+		statusBar.SetText(fmt.Sprintf("Підключено: %s | Контекстів: %d | Виберіть тип ресурсу", getDisplayName(connCtx), ctxListLen))
+	}
+
 }
 
 // --- Головна функція та запуск Fyne ---
