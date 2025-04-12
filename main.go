@@ -250,7 +250,9 @@ func switchContext(contextName string) error {
 func connectToCluster(contextName string) (*kubernetes.Clientset, string, error) {
 	logInfo("Спроба підключення до: %s", contextName)
 	if statusBar != nil {
-		statusBar.SetText(fmt.Sprintf("Підключення до '%s'...", getDisplayName(contextName)))
+		fyne.Do(func() {
+			statusBar.SetText(fmt.Sprintf("Підключення до '%s'...", getDisplayName(contextName)))
+		})
 	}
 	configOverrides := &clientcmd.ConfigOverrides{CurrentContext: contextName}
 	stateMu.RLock()
@@ -286,7 +288,9 @@ func connectToCluster(contextName string) (*kubernetes.Clientset, string, error)
 	versionString := serverVersion.GitVersion
 	logInfo("Успіх '%s'. Версія: %s", contextName, versionString)
 	if statusBar != nil {
-		statusBar.SetText(fmt.Sprintf("Підключено: %s (Сервер: %s)", getDisplayName(contextName), versionString))
+		fyne.Do(func() {
+			statusBar.SetText(fmt.Sprintf("Підключено: %s (Сервер: %s)", getDisplayName(contextName), versionString))
+		})
 	}
 	return clientset, versionString, nil
 }
@@ -348,11 +352,15 @@ func updateUIWidgets() {
 		displayCtxFromFile = getDisplayName(ctxFromFile)
 	}
 	if currentContextLabel != nil {
-		currentContextLabel.SetText("Поточний у файлі: " + displayCtxFromFile)
+		fyne.Do(func() {
+			currentContextLabel.SetText("Поточний у файлі: " + displayCtxFromFile)
+		})
 	}
 
 	if contextListWidget != nil { /* ... оновлення списку контекстів ... */
-		contextListWidget.Refresh()
+		fyne.Do(func() {
+			contextListWidget.Refresh()
+		})
 		//targetSelection := connCtx
 		//if targetSelection == "" {
 		//	targetSelection = ctxFromFile
@@ -370,12 +378,16 @@ func updateUIWidgets() {
 		//	contextListWidget.UnselectAll()
 		//}
 	}
-	if resourceTypeTree != nil { /* ... оновлення дерева ... */
-		resourceTypeTree.Refresh()
+	if resourceTypeTree != nil {
+		fyne.Do(func() {
+			resourceTypeTree.Refresh()
+		})
 		if resType != "" {
 			resourceTypeTree.Select(resType)
 		} else {
-			resourceTypeTree.UnselectAll()
+			fyne.Do(func() {
+				resourceTypeTree.UnselectAll()
+			})
 		}
 	}
 
@@ -433,14 +445,18 @@ func updateUIWidgets() {
 		}
 		stateMu.RUnlock()
 		logDebug("Оновлення списку ресурсів '%s' у UI (%d елементів)", resType, resourceCount)
-		resourceListWidget.Refresh()
+		fyne.Do(func() {
+			resourceListWidget.Refresh()
+		})
 	}
 
 	updateSystemTrayMenu()
 
 	if statusBar != nil && !strings.HasPrefix(statusMsg, "Помилка") && !strings.HasPrefix(statusMsg, "Підключення") && !strings.HasPrefix(statusMsg, "Завантаження") {
 		// Оновлено рядок стану
-		statusBar.SetText(fmt.Sprintf("Контекстів: %d | %s: %d", len(ctxList), resType, resourceCount))
+		fyne.Do(func() {
+			statusBar.SetText(fmt.Sprintf("Контекстів: %d | %s: %d", len(ctxList), resType, resourceCount))
+		})
 	}
 	logDebug("Оновлення UI віджетів завершено.")
 }
@@ -515,7 +531,9 @@ func loadSelectedResources() {
 	if clientset == nil {
 		logWarning("Спроба завантажити ресурси без clientset.")
 		if statusBar != nil {
-			statusBar.SetText("Не підключено.")
+			fyne.Do(func() {
+				statusBar.SetText("Не підключено.")
+			})
 		}
 		stateMu.Lock()
 		currentNodes = nil
@@ -538,7 +556,9 @@ func loadSelectedResources() {
 	}
 	logInfo("Завантаження ресурсів типу '%s' для '%s'", resType, contextName)
 	if statusBar != nil {
-		statusBar.SetText(fmt.Sprintf("Завантаження %s для '%s'...", resType, getDisplayName(contextName)))
+		fyne.Do(func() {
+			statusBar.SetText(fmt.Sprintf("Завантаження %s для '%s'...", resType, getDisplayName(contextName)))
+		})
 	}
 
 	var err error
@@ -934,7 +954,9 @@ func loadSelectedResources() {
 			}
 			statusMsg = fmt.Sprintf("Підключено: %s | %s: %d", getDisplayName(contextName), resType, count)
 		}
-		statusBar.SetText(statusMsg)
+		fyne.Do(func() {
+			statusBar.SetText(statusMsg)
+		})
 	}
 
 	displayResourceList()
@@ -951,13 +973,17 @@ func displayEmptyOverview() {
 		placeholder := container.NewCenter(widget.NewLabel("Виберіть контекст та тип ресурсу"))
 		// Переконуємося, що об'єкти оновлюються
 		rightPanelContainer.Objects = []fyne.CanvasObject{placeholder}
-		rightPanelContainer.Refresh()
+		fyne.Do(func() {
+			rightPanelContainer.Refresh()
+		})
 	} else {
 		logError("rightPanelContainer є nil при показі порожньої панелі")
 	}
 	// Також оновлюємо resourceListWidget, щоб він був порожнім
 	if resourceListWidget != nil {
-		resourceListWidget.Refresh()
+		fyne.Do(func() {
+			resourceListWidget.Refresh()
+		})
 	}
 }
 
@@ -1024,10 +1050,14 @@ func connectLoadAndRefresh(ctxName string) {
 func displayResourceList() {
 	logDebug("Показ списку ресурсів")
 	if rightPanelContainer != nil && resourceListWidget != nil {
-		resourceListWidget.Refresh()
+		fyne.Do(func() {
+			resourceListWidget.Refresh()
+		})
 		if len(rightPanelContainer.Objects) == 0 || rightPanelContainer.Objects[0] != resourceListWidget {
 			rightPanelContainer.Objects = []fyne.CanvasObject{resourceListWidget}
-			rightPanelContainer.Refresh()
+			fyne.Do(func() {
+				rightPanelContainer.Refresh()
+			})
 		}
 	} else {
 		logError("rightPanelContainer або resourceListWidget є nil при показі списку")
@@ -1902,8 +1932,9 @@ func displayClusterOverview(serverVersion string) {
 	overviewContent := container.NewPadded(detailsVBox)
 
 	rightPanelContainer.Objects = []fyne.CanvasObject{overviewContent}
-	rightPanelContainer.Refresh()
-
+	fyne.Do(func() {
+		rightPanelContainer.Refresh()
+	})
 	// Оновлюємо статус бар (повідомлення про підключення вже встановлено в connectToCluster)
 	// Можна додати інструкцію
 	stateMu.RLock()
@@ -1911,7 +1942,9 @@ func displayClusterOverview(serverVersion string) {
 	connCtx := connectedContextName
 	stateMu.RUnlock()
 	if statusBar != nil {
-		statusBar.SetText(fmt.Sprintf("Підключено: %s | Контекстів: %d | Виберіть тип ресурсу", getDisplayName(connCtx), ctxListLen))
+		fyne.Do(func() {
+			statusBar.SetText(fmt.Sprintf("Підключено: %s | Контекстів: %d | Виберіть тип ресурсу", getDisplayName(connCtx), ctxListLen))
+		})
 	}
 
 }
