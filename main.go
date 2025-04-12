@@ -45,7 +45,7 @@ var _ embed.FS
 
 const enableDebugLogging = true
 const logPrefix = "GoKubeLens(Step8-Network)" // Оновлено префікс
-const maxContextItems = 50
+// const maxContextItems = 50
 const labelLoading = "Завантаження..."
 const labelError = "Помилка"
 const labelNoContext = "Немає контексту"
@@ -1523,15 +1523,16 @@ func buildNotImplementedDetailsView(resourceType, resourceName string) fyne.Canv
 	backButton := widget.NewButton(labelBackToList, func() { displayResourceList() })
 	return container.NewBorder(backButton, nil, nil, nil, container.NewPadded(detailsVBox))
 }
-func buildErrorDetailsView(resourceType, resourceName string, err error) fyne.CanvasObject {
-	detailsVBox := container.NewVBox()
-	label := widget.NewLabel(fmt.Sprintf("Помилка завантаження деталей для %s '%s':\n%v", resourceType, resourceName, err))
-	label.Wrapping = fyne.TextWrapWord
-	label.Alignment = fyne.TextAlignCenter
-	detailsVBox.Add(label)
-	backButton := widget.NewButton(labelBackToList, func() { displayResourceList() })
-	return container.NewBorder(backButton, nil, nil, nil, container.NewPadded(detailsVBox))
-}
+
+//	func buildErrorDetailsView(resourceType, resourceName string, err error) fyne.CanvasObject {
+//		detailsVBox := container.NewVBox()
+//		label := widget.NewLabel(fmt.Sprintf("Помилка завантаження деталей для %s '%s':\n%v", resourceType, resourceName, err))
+//		label.Wrapping = fyne.TextWrapWord
+//		label.Alignment = fyne.TextAlignCenter
+//		detailsVBox.Add(label)
+//		backButton := widget.NewButton(labelBackToList, func() { displayResourceList() })
+//		return container.NewBorder(backButton, nil, nil, nil, container.NewPadded(detailsVBox))
+//	}
 func initializeLoadingRules() {
 	stateMu.Lock()
 	defer stateMu.Unlock()
@@ -2318,7 +2319,7 @@ func main() {
 		if resType == "System Workloads" && resourceName != "" {
 			// Для системних ворклоадів поки завжди показуємо заглушку
 			// Передаємо розпарсений тип ("deploy", "ds", ...) та ім'я
-			displayNotImplementedDetails(resType+" component", fullIdentifier) // Уточнений текст для заглушки
+			buildNotImplementedDetailsView(resType+" component", fullIdentifier) // Уточнений текст для заглушки
 		} else if obj != nil { // Для стандартних типів, де ми маємо об'єкт
 			fullName := resourceName
 			if resourceNamespace != "" {
