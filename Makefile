@@ -33,6 +33,12 @@ all: help
 go-mod-tidy:
 	go mod tidy
 
+go-clean-cache:
+	go clean -cache
+
+go-clean-modcache:
+	go clean -modcache
+
 go-build:
 	go build ./...
 

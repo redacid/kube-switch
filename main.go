@@ -59,7 +59,8 @@ var (
 	currentContextLabel *widget.Label
 	contextListWidget   *widget.List
 	resourceTypeTree    *widget.Tree
-	resourceListWidget  *widget.List
+	//resourceListWidget  *widget.List
+	resourceTable       *widget.Table
 	rightPanelContainer *fyne.Container
 	statusBar           *widget.Label
 	desktopApp          desktop.App
@@ -306,6 +307,110 @@ func getDisplayName(contextName string) string {
 	}
 	return contextName
 }
+func formatAge(t metav1.Time) string {
+	d := time.Since(t.Time)
+	if d < time.Minute {
+		return fmt.Sprintf("%ds", int(d.Seconds()))
+	}
+	if d < time.Hour {
+		return fmt.Sprintf("%dm", int(d.Minutes()))
+	}
+	if d < 24*time.Hour {
+		return fmt.Sprintf("%dh", int(d.Hours()))
+	}
+	return fmt.Sprintf("%dd", int(d.Hours()/24))
+}
+
+func formatPodContainers(statuses []corev1.ContainerStatus) string {
+	ready := 0
+	total := len(statuses)
+	for _, cs := range statuses {
+		if cs.Ready {
+			ready++
+		}
+	}
+	return fmt.Sprintf("%d/%d", ready, total)
+}
+
+func formatPodRestarts(statuses []corev1.ContainerStatus) string {
+	restarts := int32(0)
+	for _, cs := range statuses {
+		restarts += cs.RestartCount
+	}
+	return fmt.Sprintf("%d", restarts)
+}
+
+func formatOwnerRefs(refs []metav1.OwnerReference) string {
+	if len(refs) == 0 {
+		return "<none>"
+	}
+	owners := make([]string, len(refs))
+	for i, owner := range refs {
+		owners[i] = fmt.Sprintf("%s/%s", owner.Kind, owner.Name)
+	}
+	// Показуємо тільки перший для стислості в таблиці? Або всі?
+	// return owners[0]
+	return strings.Join(owners, ",") // Покажемо всі через кому
+}
+
+func formatNodeStatus(conditions []corev1.NodeCondition) string {
+	for _, cond := range conditions {
+		if cond.Type == corev1.NodeReady {
+			if cond.Status == corev1.ConditionTrue {
+				return "Ready"
+			}
+			// Додамо інші статуси, якщо Ready=False або Unknown
+			for _, c := range conditions {
+				// Шукаємо причину неготовності (якщо є)
+				if c.Status != corev1.ConditionTrue && c.Reason != "" {
+					return c.Reason
+				}
+			}
+			return "NotReady"
+		}
+	}
+	return "Unknown"
+}
+func formatNodeRoles(labels map[string]string) string {
+	roles := []string{}
+	for label := range labels {
+		if strings.HasPrefix(label, "node-role.kubernetes.io/") {
+			roles = append(roles, strings.TrimPrefix(label, "node-role.kubernetes.io/"))
+		}
+	}
+	if len(roles) == 0 {
+		roles = append(roles, "<none>")
+	}
+	sort.Strings(roles)
+	return strings.Join(roles, ",")
+}
+func formatPorts(ports []corev1.ServicePort) string {
+	portsStr := []string{}
+	for _, port := range ports {
+		pStr := fmt.Sprintf("%d", port.Port)
+		if port.NodePort > 0 {
+			pStr += fmt.Sprintf(":%d", port.NodePort)
+		}
+		pStr += "/" + string(port.Protocol)
+		if port.Name != "" {
+			pStr += " (" + port.Name + ")"
+		}
+		portsStr = append(portsStr, pStr)
+	}
+	return strings.Join(portsStr, ", ")
+}
+func formatIngressHosts(rules []networkingv1.IngressRule) string {
+	hosts := []string{}
+	for _, rule := range rules {
+		if rule.Host != "" {
+			hosts = append(hosts, rule.Host)
+		}
+	}
+	if len(hosts) == 0 {
+		return "*"
+	}
+	return strings.Join(hosts, ",")
+}
 
 // --- Оновлення UI віджетів Fyne ---
 func updateUIWidgets() {
@@ -392,7 +497,7 @@ func updateUIWidgets() {
 	}
 
 	resourceCount := 0
-	if resourceListWidget != nil {
+	if resourceTable != nil {
 		stateMu.RLock() // Потрібне блокування для читання кількості
 		switch resType {
 		case "Namespaces":
@@ -446,7 +551,7 @@ func updateUIWidgets() {
 		stateMu.RUnlock()
 		logDebug("Оновлення списку ресурсів '%s' у UI (%d елементів)", resType, resourceCount)
 		fyne.Do(func() {
-			resourceListWidget.Refresh()
+			resourceTable.Refresh()
 		})
 	}
 
@@ -515,7 +620,7 @@ func loadAndUpdateState() {
 		statusBar.SetText(statusMsg)
 	}
 
-	displayResourceList()
+	displayResourceTableView()
 	logDebug("Виклик оновлення UI віджетів після завантаження")
 	updateUIWidgets()
 	logInfo("Завантаження та оновлення стану завершено.")
@@ -550,7 +655,7 @@ func loadSelectedResources() {
 		currentServices = nil
 		currentIngresses = nil
 		stateMu.Unlock()
-		displayResourceList()
+		displayResourceTableView()
 		updateUIWidgets()
 		return
 	}
@@ -959,7 +1064,7 @@ func loadSelectedResources() {
 		})
 	}
 
-	displayResourceList()
+	displayResourceTableView()
 	updateUIWidgets()
 	logInfo("Завантаження '%s' завершено.", resType)
 }
@@ -979,10 +1084,10 @@ func displayEmptyOverview() {
 	} else {
 		logError("rightPanelContainer є nil при показі порожньої панелі")
 	}
-	// Також оновлюємо resourceListWidget, щоб він був порожнім
-	if resourceListWidget != nil {
+	// Також оновлюємо resourceTable, щоб він був порожнім
+	if resourceTable != nil {
 		fyne.Do(func() {
-			resourceListWidget.Refresh()
+			resourceTable.Refresh()
 		})
 	}
 }
@@ -1047,20 +1152,20 @@ func connectLoadAndRefresh(ctxName string) {
 }
 
 // --- Функції для перемикання вмісту правої панелі ---
-func displayResourceList() {
+func displayResourceTableView() {
 	logDebug("Показ списку ресурсів")
-	if rightPanelContainer != nil && resourceListWidget != nil {
+	if rightPanelContainer != nil && resourceTable != nil {
 		fyne.Do(func() {
-			resourceListWidget.Refresh()
+			resourceTable.Refresh()
 		})
-		if len(rightPanelContainer.Objects) == 0 || rightPanelContainer.Objects[0] != resourceListWidget {
-			rightPanelContainer.Objects = []fyne.CanvasObject{resourceListWidget}
+		if len(rightPanelContainer.Objects) == 0 || rightPanelContainer.Objects[0] != resourceTable {
+			rightPanelContainer.Objects = []fyne.CanvasObject{resourceTable}
 			fyne.Do(func() {
 				rightPanelContainer.Refresh()
 			})
 		}
 	} else {
-		logError("rightPanelContainer або resourceListWidget є nil при показі списку")
+		logError("rightPanelContainer або resourceTable є nil при показі списку")
 	}
 }
 
@@ -1125,7 +1230,7 @@ func buildNodeDetailsView(node corev1.Node) fyne.CanvasObject {
 	detailsVBox.Add(createDetailRow("CPU (Capacity)", cpu.String()))
 	detailsVBox.Add(createDetailRow("Memory (Capacity)", mem.String()))
 	detailsVBox.Add(createDetailRow("Pods (Capacity)", pods.String()))
-	backButton := widget.NewButton(labelBackToList, func() { displayResourceList() })
+	backButton := widget.NewButton(labelBackToList, func() { displayResourceTableView() })
 	return container.NewBorder(backButton, nil, nil, nil, container.NewVScroll(detailsVBox))
 }
 func buildPodDetailsView(pod corev1.Pod) fyne.CanvasObject {
@@ -1161,7 +1266,7 @@ func buildPodDetailsView(pod corev1.Pod) fyne.CanvasObject {
 		containerBox.Add(widget.NewLabel("  <none>"))
 	}
 	detailsVBox.Add(containerBox)
-	backButton := widget.NewButton(labelBackToList, func() { displayResourceList() })
+	backButton := widget.NewButton(labelBackToList, func() { displayResourceTableView() })
 	return container.NewBorder(backButton, nil, nil, nil, container.NewVScroll(detailsVBox))
 }
 func buildNamespaceDetailsView(ns corev1.Namespace) fyne.CanvasObject {
@@ -1194,7 +1299,7 @@ func buildNamespaceDetailsView(ns corev1.Namespace) fyne.CanvasObject {
 			detailsVBox.Add(createDetailRow("  "+k, ns.Annotations[k]))
 		}
 	}
-	backButton := widget.NewButton(labelBackToList, func() { displayResourceList() })
+	backButton := widget.NewButton(labelBackToList, func() { displayResourceTableView() })
 	return container.NewBorder(backButton, nil, nil, nil, container.NewVScroll(detailsVBox))
 }
 func buildDeploymentDetailsView(dep appsv1.Deployment) fyne.CanvasObject {
@@ -1205,7 +1310,7 @@ func buildDeploymentDetailsView(dep appsv1.Deployment) fyne.CanvasObject {
 	detailsVBox.Add(createDetailRow("Created", dep.CreationTimestamp.Format(time.RFC1123)))
 	detailsVBox.Add(createDetailRow("Replicas", fmt.Sprintf("%d desired, %d updated, %d total, %d available, %d unavailable", *dep.Spec.Replicas, dep.Status.UpdatedReplicas, dep.Status.Replicas, dep.Status.AvailableReplicas, dep.Status.UnavailableReplicas)))
 	detailsVBox.Add(createDetailRow("Strategy", string(dep.Spec.Strategy.Type)))
-	backButton := widget.NewButton(labelBackToList, func() { displayResourceList() })
+	backButton := widget.NewButton(labelBackToList, func() { displayResourceTableView() })
 	return container.NewBorder(backButton, nil, nil, nil, container.NewVScroll(detailsVBox))
 }
 func buildStatefulSetDetailsView(sts appsv1.StatefulSet) fyne.CanvasObject {
@@ -1216,7 +1321,7 @@ func buildStatefulSetDetailsView(sts appsv1.StatefulSet) fyne.CanvasObject {
 	detailsVBox.Add(createDetailRow("Created", sts.CreationTimestamp.Format(time.RFC1123)))
 	detailsVBox.Add(createDetailRow("Replicas", fmt.Sprintf("%d desired, %d current, %d ready", *sts.Spec.Replicas, sts.Status.CurrentReplicas, sts.Status.ReadyReplicas)))
 	detailsVBox.Add(createDetailRow("Service Name", sts.Spec.ServiceName))
-	backButton := widget.NewButton(labelBackToList, func() { displayResourceList() })
+	backButton := widget.NewButton(labelBackToList, func() { displayResourceTableView() })
 	return container.NewBorder(backButton, nil, nil, nil, container.NewVScroll(detailsVBox))
 }
 func buildDaemonSetDetailsView(ds appsv1.DaemonSet) fyne.CanvasObject {
@@ -1227,7 +1332,7 @@ func buildDaemonSetDetailsView(ds appsv1.DaemonSet) fyne.CanvasObject {
 	detailsVBox.Add(createDetailRow("Created", ds.CreationTimestamp.Format(time.RFC1123)))
 	detailsVBox.Add(createDetailRow("Pods", fmt.Sprintf("%d desired, %d current, %d ready, %d available, %d unavailable", ds.Status.DesiredNumberScheduled, ds.Status.CurrentNumberScheduled, ds.Status.NumberReady, ds.Status.NumberAvailable, ds.Status.NumberUnavailable)))
 	detailsVBox.Add(createDetailRow("Update Strategy", string(ds.Spec.UpdateStrategy.Type)))
-	backButton := widget.NewButton(labelBackToList, func() { displayResourceList() })
+	backButton := widget.NewButton(labelBackToList, func() { displayResourceTableView() })
 	return container.NewBorder(backButton, nil, nil, nil, container.NewVScroll(detailsVBox))
 }
 func buildReplicaSetDetailsView(rs appsv1.ReplicaSet) fyne.CanvasObject {
@@ -1237,7 +1342,7 @@ func buildReplicaSetDetailsView(rs appsv1.ReplicaSet) fyne.CanvasObject {
 	detailsVBox.Add(createDetailRow("Namespace", rs.Namespace))
 	detailsVBox.Add(createDetailRow("Created", rs.CreationTimestamp.Format(time.RFC1123)))
 	detailsVBox.Add(createDetailRow("Replicas", fmt.Sprintf("%d desired, %d current, %d ready", *rs.Spec.Replicas, rs.Status.Replicas, rs.Status.ReadyReplicas)))
-	backButton := widget.NewButton(labelBackToList, func() { displayResourceList() })
+	backButton := widget.NewButton(labelBackToList, func() { displayResourceTableView() })
 	return container.NewBorder(backButton, nil, nil, nil, container.NewVScroll(detailsVBox))
 }
 func buildJobDetailsView(job batchv1.Job) fyne.CanvasObject {
@@ -1258,7 +1363,7 @@ func buildJobDetailsView(job batchv1.Job) fyne.CanvasObject {
 	detailsVBox.Add(createDetailRow("Parallelism", parallelism))
 	detailsVBox.Add(createDetailRow("Status", fmt.Sprintf("%d active, %d succeeded, %d failed", job.Status.Active, job.Status.Succeeded, job.Status.Failed)))
 	// TODO: Додати більше полів - Conditions, Template...
-	backButton := widget.NewButton(labelBackToList, func() { displayResourceList() })
+	backButton := widget.NewButton(labelBackToList, func() { displayResourceTableView() })
 	return container.NewBorder(backButton, nil, nil, nil, container.NewVScroll(detailsVBox))
 }
 func buildCronJobDetailsView(cj batchv1.CronJob) fyne.CanvasObject {
@@ -1280,7 +1385,7 @@ func buildCronJobDetailsView(cj batchv1.CronJob) fyne.CanvasObject {
 	}
 	detailsVBox.Add(createDetailRow("Last Schedule", lastSchedule))
 	detailsVBox.Add(createDetailRow("Concurrency Policy", string(cj.Spec.ConcurrencyPolicy)))
-	backButton := widget.NewButton(labelBackToList, func() { displayResourceList() })
+	backButton := widget.NewButton(labelBackToList, func() { displayResourceTableView() })
 	return container.NewBorder(backButton, nil, nil, nil, container.NewVScroll(detailsVBox))
 }
 func buildConfigMapDetailsView(cm corev1.ConfigMap) fyne.CanvasObject {
@@ -1290,7 +1395,7 @@ func buildConfigMapDetailsView(cm corev1.ConfigMap) fyne.CanvasObject {
 	detailsVBox.Add(createDetailRow("Namespace", cm.Namespace))
 	detailsVBox.Add(createDetailRow("Created", cm.CreationTimestamp.Format(time.RFC1123)))
 	detailsVBox.Add(createDetailRow("Data Keys", fmt.Sprintf("%d", len(cm.Data))))
-	backButton := widget.NewButton(labelBackToList, func() { displayResourceList() })
+	backButton := widget.NewButton(labelBackToList, func() { displayResourceTableView() })
 	return container.NewBorder(backButton, nil, nil, nil, container.NewVScroll(detailsVBox))
 }
 func buildSecretDetailsView(secret corev1.Secret) fyne.CanvasObject {
@@ -1301,7 +1406,7 @@ func buildSecretDetailsView(secret corev1.Secret) fyne.CanvasObject {
 	detailsVBox.Add(createDetailRow("Created", secret.CreationTimestamp.Format(time.RFC1123)))
 	detailsVBox.Add(createDetailRow("Type", string(secret.Type)))
 	detailsVBox.Add(createDetailRow("Data Keys", fmt.Sprintf("%d", len(secret.Data))))
-	backButton := widget.NewButton(labelBackToList, func() { displayResourceList() })
+	backButton := widget.NewButton(labelBackToList, func() { displayResourceTableView() })
 	return container.NewBorder(backButton, nil, nil, nil, container.NewVScroll(detailsVBox))
 }
 func buildServiceDetailsView(svc corev1.Service) fyne.CanvasObject {
@@ -1349,7 +1454,7 @@ func buildServiceDetailsView(svc corev1.Service) fyne.CanvasObject {
 	}
 	detailsVBox.Add(createDetailRow("Selector", selectorStr))
 
-	backButton := widget.NewButton(labelBackToList, func() { displayResourceList() })
+	backButton := widget.NewButton(labelBackToList, func() { displayResourceTableView() })
 	return container.NewBorder(backButton, nil, nil, nil, container.NewVScroll(detailsVBox))
 }
 func buildIngressDetailsView(ing networkingv1.Ingress) fyne.CanvasObject {
@@ -1420,7 +1525,7 @@ func buildIngressDetailsView(ing networkingv1.Ingress) fyne.CanvasObject {
 	}
 	detailsVBox.Add(widget.NewLabel(strings.Join(lbStatus, ", ")))
 
-	backButton := widget.NewButton(labelBackToList, func() { displayResourceList() })
+	backButton := widget.NewButton(labelBackToList, func() { displayResourceTableView() })
 	return container.NewBorder(backButton, nil, nil, nil, container.NewVScroll(detailsVBox))
 }
 func buildServiceAccountDetailsView(sa corev1.ServiceAccount) fyne.CanvasObject {
@@ -1430,7 +1535,7 @@ func buildServiceAccountDetailsView(sa corev1.ServiceAccount) fyne.CanvasObject 
 	detailsVBox.Add(createDetailRow("Namespace", sa.Namespace))
 	detailsVBox.Add(createDetailRow("Created", sa.CreationTimestamp.Format(time.RFC1123)))
 	// TODO: Додати більше полів
-	backButton := widget.NewButton(labelBackToList, func() { displayResourceList() })
+	backButton := widget.NewButton(labelBackToList, func() { displayResourceTableView() })
 	return container.NewBorder(backButton, nil, nil, nil, container.NewVScroll(detailsVBox))
 }
 func buildRoleDetailsView(role rbacv1.Role) fyne.CanvasObject {
@@ -1440,7 +1545,7 @@ func buildRoleDetailsView(role rbacv1.Role) fyne.CanvasObject {
 	detailsVBox.Add(createDetailRow("Namespace", role.Namespace))
 	detailsVBox.Add(createDetailRow("Created", role.CreationTimestamp.Format(time.RFC1123)))
 	// TODO: Додати більше полів (правила)
-	backButton := widget.NewButton(labelBackToList, func() { displayResourceList() })
+	backButton := widget.NewButton(labelBackToList, func() { displayResourceTableView() })
 	return container.NewBorder(backButton, nil, nil, nil, container.NewVScroll(detailsVBox))
 }
 func buildRoleBindingDetailsView(rb rbacv1.RoleBinding) fyne.CanvasObject {
@@ -1452,7 +1557,7 @@ func buildRoleBindingDetailsView(rb rbacv1.RoleBinding) fyne.CanvasObject {
 	detailsVBox.Add(createDetailRow("Role Kind", rb.RoleRef.Kind))
 	detailsVBox.Add(createDetailRow("Role Name", rb.RoleRef.Name))
 	// TODO: Додати більше полів (суб'єкти)
-	backButton := widget.NewButton(labelBackToList, func() { displayResourceList() })
+	backButton := widget.NewButton(labelBackToList, func() { displayResourceTableView() })
 	return container.NewBorder(backButton, nil, nil, nil, container.NewVScroll(detailsVBox))
 }
 func buildClusterRoleDetailsView(cr rbacv1.ClusterRole) fyne.CanvasObject {
@@ -1461,7 +1566,7 @@ func buildClusterRoleDetailsView(cr rbacv1.ClusterRole) fyne.CanvasObject {
 	detailsVBox.Add(createDetailRow("Name", cr.Name))
 	detailsVBox.Add(createDetailRow("Created", cr.CreationTimestamp.Format(time.RFC1123)))
 	// TODO: Додати більше полів (правила)
-	backButton := widget.NewButton(labelBackToList, func() { displayResourceList() })
+	backButton := widget.NewButton(labelBackToList, func() { displayResourceTableView() })
 	return container.NewBorder(backButton, nil, nil, nil, container.NewVScroll(detailsVBox))
 }
 func buildClusterRoleBindingDetailsView(crb rbacv1.ClusterRoleBinding) fyne.CanvasObject {
@@ -1472,7 +1577,7 @@ func buildClusterRoleBindingDetailsView(crb rbacv1.ClusterRoleBinding) fyne.Canv
 	detailsVBox.Add(createDetailRow("Role Kind", crb.RoleRef.Kind))
 	detailsVBox.Add(createDetailRow("Role Name", crb.RoleRef.Name))
 	// TODO: Додати більше полів (суб'єкти)
-	backButton := widget.NewButton(labelBackToList, func() { displayResourceList() })
+	backButton := widget.NewButton(labelBackToList, func() { displayResourceTableView() })
 	return container.NewBorder(backButton, nil, nil, nil, container.NewVScroll(detailsVBox))
 }
 func buildPersistentVolumeDetailsView(pv corev1.PersistentVolume) fyne.CanvasObject {
@@ -1498,7 +1603,7 @@ func buildPersistentVolumeDetailsView(pv corev1.PersistentVolume) fyne.CanvasObj
 		detailsVBox.Add(createDetailRow("Claim", "<none>"))
 	}
 	// TODO: Додати більше полів
-	backButton := widget.NewButton(labelBackToList, func() { displayResourceList() })
+	backButton := widget.NewButton(labelBackToList, func() { displayResourceTableView() })
 	return container.NewBorder(backButton, nil, nil, nil, container.NewVScroll(detailsVBox))
 }
 func buildPersistentVolumeClaimDetailsView(pvc corev1.PersistentVolumeClaim) fyne.CanvasObject {
@@ -1525,7 +1630,7 @@ func buildPersistentVolumeClaimDetailsView(pvc corev1.PersistentVolumeClaim) fyn
 		detailsVBox.Add(createDetailRow("Volume", "<none>"))
 	}
 	// TODO: Додати більше полів
-	backButton := widget.NewButton(labelBackToList, func() { displayResourceList() })
+	backButton := widget.NewButton(labelBackToList, func() { displayResourceTableView() })
 	return container.NewBorder(backButton, nil, nil, nil, container.NewVScroll(detailsVBox))
 }
 func buildStorageClassDetailsView(sc storagev1.StorageClass) fyne.CanvasObject {
@@ -1542,7 +1647,7 @@ func buildStorageClassDetailsView(sc storagev1.StorageClass) fyne.CanvasObject {
 	bindingMode := string(*sc.VolumeBindingMode)
 	detailsVBox.Add(createDetailRow("Volume Binding Mode", bindingMode))
 	// TODO: Додати більше полів (параметри)
-	backButton := widget.NewButton(labelBackToList, func() { displayResourceList() })
+	backButton := widget.NewButton(labelBackToList, func() { displayResourceTableView() })
 	return container.NewBorder(backButton, nil, nil, nil, container.NewVScroll(detailsVBox))
 }
 func buildNotImplementedDetailsView(resourceType, resourceName string) fyne.CanvasObject {
@@ -1552,19 +1657,94 @@ func buildNotImplementedDetailsView(resourceType, resourceName string) fyne.Canv
 	label.Wrapping = fyne.TextWrapWord
 	label.Alignment = fyne.TextAlignCenter
 	detailsVBox.Add(label)
-	backButton := widget.NewButton(labelBackToList, func() { displayResourceList() })
+	backButton := widget.NewButton(labelBackToList, func() { displayResourceTableView() })
 	return container.NewBorder(backButton, nil, nil, nil, container.NewPadded(detailsVBox))
 }
 
-//	func buildErrorDetailsView(resourceType, resourceName string, err error) fyne.CanvasObject {
-//		detailsVBox := container.NewVBox()
-//		label := widget.NewLabel(fmt.Sprintf("Помилка завантаження деталей для %s '%s':\n%v", resourceType, resourceName, err))
-//		label.Wrapping = fyne.TextWrapWord
-//		label.Alignment = fyne.TextAlignCenter
-//		detailsVBox.Add(label)
-//		backButton := widget.NewButton(labelBackToList, func() { displayResourceList() })
-//		return container.NewBorder(backButton, nil, nil, nil, container.NewPadded(detailsVBox))
-//	}
+func buildErrorDetailsView(resourceType, resourceName string, err error) fyne.CanvasObject {
+	detailsVBox := container.NewVBox()
+	label := widget.NewLabel(fmt.Sprintf("Помилка завантаження деталей для %s '%s':\n%v", resourceType, resourceName, err))
+	label.Wrapping = fyne.TextWrapWord
+	label.Alignment = fyne.TextAlignCenter
+	detailsVBox.Add(label)
+	backButton := widget.NewButton(labelBackToList, func() { displayResourceTableView() })
+	return container.NewBorder(backButton, nil, nil, nil, container.NewPadded(detailsVBox))
+}
+
+// Отримує повний об'єкт ресурсу System Workload за типом/іменем/неймспейсом і показує його деталі
+func fetchAndDisplayResourceDetails(resTypePrefix string, namespace string, name string) {
+	logInfo("Запит деталей для %s: %s/%s", resTypePrefix, namespace, name)
+
+	// Показуємо індикатор завантаження безпечно
+	queueUIUpdate(func() { // Використовуємо хелпер, якщо він є, або fyneApp.Do
+		if rightPanelContainer != nil {
+			loadingLabel := widget.NewLabel(fmt.Sprintf("Завантаження деталей для %s %s/%s...", resTypePrefix, namespace, name))
+			loadingLabel.Alignment = fyne.TextAlignCenter
+			rightPanelContainer.Objects = []fyne.CanvasObject{container.NewCenter(loadingLabel)}
+			rightPanelContainer.Refresh()
+		}
+	})
+
+	stateMu.RLock()
+	clientset := currentClientset
+	stateMu.RUnlock()
+
+	if clientset == nil {
+		logError("Неможливо отримати деталі: немає clientset")
+		// Показуємо помилку через диспетчер деталей (передаємо помилку)
+		queueUIUpdate(func() { // Використовуємо хелпер, якщо він є, або fyneApp.Do
+			displayResourceDetails("Error", fmt.Errorf("немає активного підключення до кластера"))
+		})
+		return
+	}
+
+	var obj interface{} // Тут буде повний об'єкт
+	var err error
+	var finalResType string // Повний тип ресурсу для диспетчера деталей
+
+	ctxTimeout, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	// Робимо Get запит залежно від префіксу типу
+	switch resTypePrefix {
+	case "deploy":
+		finalResType = "Deployments"
+		obj, err = clientset.AppsV1().Deployments(namespace).Get(ctxTimeout, name, metav1.GetOptions{})
+	case "ds":
+		finalResType = "DaemonSets"
+		obj, err = clientset.AppsV1().DaemonSets(namespace).Get(ctxTimeout, name, metav1.GetOptions{})
+	case "sts":
+		finalResType = "StatefulSets"
+		obj, err = clientset.AppsV1().StatefulSets(namespace).Get(ctxTimeout, name, metav1.GetOptions{})
+	default:
+		err = fmt.Errorf("невідомий префікс типу '%s' для System Workload", resTypePrefix)
+	}
+
+	// Викликаємо диспетчер деталей з результатом (об'єктом або помилкою)
+	queueUIUpdate(func() { // Використовуємо хелпер, якщо він є, або fyneApp.Do
+		if err != nil {
+			logError("Помилка отримання деталей для %s %s/%s: %v", resTypePrefix, namespace, name, err)
+			// Передаємо помилку в диспетчер, який викличе buildErrorDetailsView
+			displayResourceDetails(finalResType+" ("+resTypePrefix+")", err) // Передаємо тип та помилку
+		} else if obj != nil {
+			logDebug("Успішно отримано деталі для %s %s/%s", resTypePrefix, namespace, name)
+			displayResourceDetails(finalResType, obj) // Передаємо тип та об'єкт
+		} else {
+			// Цього не мало б статись, якщо Get не повернув помилку
+			logError("Об'єкт nil після Get без помилки для %s %s/%s", resTypePrefix, namespace, name)
+			displayResourceDetails(finalResType+" ("+resTypePrefix+")", errors.New("API не повернув об'єкт"))
+		}
+	})
+}
+
+func queueUIUpdate(f func()) {
+	if fyneApp == nil {
+		logError("queueUIUpdate викликано до ініціалізації fyneApp!")
+		return
+	}
+	fyne.Do(f) // Використовуємо правильний метод Do
+}
+
 func initializeLoadingRules() {
 	stateMu.Lock()
 	defer stateMu.Unlock()
@@ -1952,50 +2132,41 @@ func displayClusterOverview(serverVersion string) {
 // --- Головна функція та запуск Fyne ---
 func main() {
 	log.SetFlags(log.Ldate | log.Ltime)
-	logInfo("Запуск " + logPrefix + "...")
+	logInfo("Запуск " + logPrefix + "...") // Використовуємо оновлений префікс
 	logInfo("Версія Go: %s", runtime.Version())
 
 	initializeLoadingRules()
-	setupFileWatcher()
 	fyneApp = app.NewWithID(appID)
+	mainWindow = fyneApp.NewWindow(appTitle) // Використовуємо оновлений заголовок
+	selectedResourceType = "Nodes"           // Починаємо з вузлів за замовчуванням
 
-	// --- Повертаємо налаштування трея ---
+	// --- Налаштування трея (як у вашій версії) ---
 	resIconPng := fyne.NewStaticResource("icon.png", iconData)
-	// Перевірка, чи дані іконки завантажились (чи існує icon.png)
 	if len(iconData) == 0 {
 		logWarning("Дані іконки для трея порожні! Перевірте наявність icon.png та директиву //go:embed.")
-		resIconPng = nil // Якщо даних немає, іконку не встановлюємо
+		resIconPng = nil
 	}
-
-	// Перевіряємо підтримку системного трея та налаштовуємо його
 	if drv, ok := fyneApp.(desktop.App); ok {
-		desktopApp = drv // Зберігаємо для оновлення меню
+		desktopApp = drv
 		if resIconPng != nil {
-			// Встановлюємо іконку, якщо вона успішно завантажена
 			desktopApp.SetSystemTrayIcon(resIconPng)
 		} else {
 			logWarning("Не вдалося встановити іконку трея: ресурс порожній.")
-			// Можна встановити якусь стандартну іконку Fyne як запасний варіант, якщо потрібно
-			// desktopApp.SetSystemTrayIcon(theme.QuestionIcon())
 		}
-		// Створюємо та встановлюємо початкове меню трея
-		trayMenu = buildContextMenu() // buildContextMenu має бути визначена
+		trayMenu = buildContextMenu()
 		desktopApp.SetSystemTrayMenu(trayMenu)
 		logInfo("Системний трей налаштовано.")
 	} else {
-		desktopApp = nil // Явно вказуємо, що трей не підтримується
-		logInfo("Системний трей не підтримується цією системою/драйвером.")
+		desktopApp = nil
+		logInfo("Системний трей не підтримується.")
 	}
 	// -------------------------------------------
-
-	mainWindow = fyneApp.NewWindow(appTitle)
-	selectedResourceType = "Nodes"
 
 	// --- Створюємо UI елементи ---
 	currentContextLabel = widget.NewLabel(labelLoading)
 	statusBar = widget.NewLabel("Ініціалізація...")
 
-	contextListWidget = widget.NewList( /* ... */
+	contextListWidget = widget.NewList(
 		func() int { stateMu.RLock(); defer stateMu.RUnlock(); return len(allContextNames) },
 		func() fyne.CanvasObject { return widget.NewLabel("template") },
 		func(id widget.ListItemID, item fyne.CanvasObject) {
@@ -2008,7 +2179,7 @@ func main() {
 			item.(*widget.Label).SetText(getDisplayName(name))
 		},
 	)
-	contextListWidget.OnSelected = func(id widget.ListItemID) { /* ... */
+	contextListWidget.OnSelected = func(id widget.ListItemID) {
 		stateMu.RLock()
 		selectedName := ""
 		if id >= 0 && id < len(allContextNames) {
@@ -2026,7 +2197,7 @@ func main() {
 		}
 	}
 
-	resourceTypeTree = widget.NewTree( /* ... */
+	resourceTypeTree = widget.NewTree(
 		func(id widget.TreeNodeID) []widget.TreeNodeID {
 			children, _ := resourceTreeData[id]
 			sort.Strings(children)
@@ -2040,23 +2211,27 @@ func main() {
 			if branch {
 				return container.NewHBox(widget.NewIcon(theme.FolderIcon()), widget.NewLabel("Template Group"))
 			}
-			return widget.NewLabel("Template Resource")
+			return container.NewHBox(widget.NewIcon(theme.FileTextIcon()), widget.NewLabel("Template Resource"))
 		},
 		func(id widget.TreeNodeID, branch bool, node fyne.CanvasObject) {
+			parts := strings.Split(id, "/")
+			displayName := parts[len(parts)-1]
 			if branch {
-				if cont, ok := node.(*fyne.Container); ok && len(cont.Objects) > 1 {
+				if cont, ok := node.(*fyne.Container); ok && len(cont.Objects) == 2 {
 					if lbl, ok2 := cont.Objects[1].(*widget.Label); ok2 {
-						lbl.SetText(id)
+						lbl.SetText(displayName)
 					}
 				}
 			} else {
-				if lbl, ok := node.(*widget.Label); ok {
-					lbl.SetText(id)
+				if cont, ok := node.(*fyne.Container); ok && len(cont.Objects) == 2 {
+					if lbl, ok2 := cont.Objects[1].(*widget.Label); ok2 {
+						lbl.SetText(displayName)
+					}
 				}
 			}
 		},
 	)
-	resourceTypeTree.OnSelected = func(id widget.TreeNodeID) { /* ... */
+	resourceTypeTree.OnSelected = func(id widget.TreeNodeID) {
 		logInfo("Вибрано вузол дерева ресурсів: %s", id)
 		if resourceLeafNodes[id] {
 			logInfo("Це листовий вузол - тип ресурсу: %s", id)
@@ -2076,291 +2251,414 @@ func main() {
 			} else {
 				resourceTypeTree.OpenBranch(id)
 			}
+			resourceTypeTree.Unselect(id)
 		}
 	}
 	resourceTypeTree.OpenBranch("Cluster")
 	resourceTypeTree.OpenBranch("Workloads")
 
-	resourceListWidget = widget.NewList( /* ... */
-		func() int {
+	// --- Створення Таблиці Ресурсів ---
+	resourceTable = widget.NewTable(
+		func() (int, int) {
 			stateMu.RLock()
 			defer stateMu.RUnlock()
+			rows := 0
+			cols := 1 // Default
 			switch selectedResourceType {
 			case "Namespaces":
-				return len(currentNamespaces)
+				rows = len(currentNamespaces)
+				cols = 3 // Name, Status, Age
 			case "Nodes":
-				return len(currentNodes)
+				rows = len(currentNodes)
+				cols = 4 // Name, Status, Roles, Version
 			case "Pods":
-				return len(currentPods)
+				rows = len(currentPods)
+				cols = 9 // Name, Namespace, Containers, Restarts, Controlled By, Node, QoS, Age, Status
 			case "Deployments":
-				return len(currentDeployments)
+				rows = len(currentDeployments)
+				cols = 4 // Name, Namespace, Ready, Age
 			case "StatefulSets":
-				return len(currentStatefulSets)
+				rows = len(currentStatefulSets)
+				cols = 4 // Name, Namespace, Ready, Age
 			case "DaemonSets":
-				return len(currentDaemonSets)
+				rows = len(currentDaemonSets)
+				cols = 5 // Name, Namespace, Desired, Current, Ready
 			case "ReplicaSets":
-				return len(currentReplicaSets)
+				rows = len(currentReplicaSets)
+				cols = 5 // Name, Namespace, Desired, Current, Ready
 			case "Jobs":
-				return len(currentJobs)
+				rows = len(currentJobs)
+				cols = 4 // Name, Namespace, Completions, Age
 			case "CronJobs":
-				return len(currentCronJobs)
+				rows = len(currentCronJobs)
+				cols = 5 // Name, Namespace, Schedule, Suspend, Last Schedule
 			case "ConfigMaps":
-				return len(currentConfigMaps)
+				rows = len(currentConfigMaps)
+				cols = 3 // Name, Namespace, Data Keys
 			case "Secrets":
-				return len(currentSecrets)
+				rows = len(currentSecrets)
+				cols = 4 // Name, Namespace, Type, Data Keys
 			case "Services":
-				return len(currentServices)
+				rows = len(currentServices)
+				cols = 5 // Name, Namespace, Type, ClusterIP, Ports
 			case "Ingresses":
-				return len(currentIngresses)
-			case "ServiceAccounts":
-				return len(currentServiceAccounts)
-			case "Roles":
-				return len(currentRoles)
-			case "RoleBindings":
-				return len(currentRoleBindings)
-			case "ClusterRoles":
-				return len(currentClusterRoles)
-			case "ClusterRoleBindings":
-				return len(currentClusterRoleBindings)
-			case "PersistentVolumes":
-				return len(currentPersistentVolumes)
-			case "PersistentVolumeClaims":
-				return len(currentPersistentVolumeClaims)
-			case "StorageClasses":
-				return len(currentStorageClasses)
+				rows = len(currentIngresses)
+				cols = 4 // Name, Namespace, Class, Hosts
 			case "System Workloads":
-				return len(currentSystemWorkloads)
-			default:
-				return 0
+				rows = len(currentSystemWorkloads)
+				cols = 1
 			}
+			logDebug("Table Length: Rows=%d, Cols=%d for Type=%s", rows, cols, selectedResourceType)
+			return rows, cols
 		},
-		func() fyne.CanvasObject { return widget.NewLabel("template resource") },
-		func(id widget.ListItemID, item fyne.CanvasObject) {
+		func() fyne.CanvasObject {
+			// Додаємо властивість truncation для довгих імен
+			l := widget.NewLabel("Template")
+			l.Truncation = fyne.TextTruncateEllipsis
+			return l
+		},
+		func(id widget.TableCellID, cell fyne.CanvasObject) {
+			label := cell.(*widget.Label)
 			stateMu.RLock()
-			name := ""
 			resType := selectedResourceType
+			var dataStr string = ""
+			validRow := false
+			// Визначаємо, чи дійсний рядок для поточного типу
 			switch resType {
 			case "Namespaces":
-				if id >= 0 && id < len(currentNamespaces) {
-					name = currentNamespaces[id].Name
-				}
+				validRow = id.Row >= 0 && id.Row < len(currentNamespaces)
 			case "Nodes":
-				if id >= 0 && id < len(currentNodes) {
-					name = currentNodes[id].Name
-				}
+				validRow = id.Row >= 0 && id.Row < len(currentNodes)
 			case "Pods":
-				if id >= 0 && id < len(currentPods) {
-					name = fmt.Sprintf("%s/%s", currentPods[id].Namespace, currentPods[id].Name)
-				}
+				validRow = id.Row >= 0 && id.Row < len(currentPods)
 			case "Deployments":
-				if id >= 0 && id < len(currentDeployments) {
-					name = fmt.Sprintf("%s/%s", currentDeployments[id].Namespace, currentDeployments[id].Name)
-				}
+				validRow = id.Row >= 0 && id.Row < len(currentDeployments)
 			case "StatefulSets":
-				if id >= 0 && id < len(currentStatefulSets) {
-					name = fmt.Sprintf("%s/%s", currentStatefulSets[id].Namespace, currentStatefulSets[id].Name)
-				}
+				validRow = id.Row >= 0 && id.Row < len(currentStatefulSets)
 			case "DaemonSets":
-				if id >= 0 && id < len(currentDaemonSets) {
-					name = fmt.Sprintf("%s/%s", currentDaemonSets[id].Namespace, currentDaemonSets[id].Name)
-				}
+				validRow = id.Row >= 0 && id.Row < len(currentDaemonSets)
 			case "ReplicaSets":
-				if id >= 0 && id < len(currentReplicaSets) {
-					name = fmt.Sprintf("%s/%s", currentReplicaSets[id].Namespace, currentReplicaSets[id].Name)
-				}
+				validRow = id.Row >= 0 && id.Row < len(currentReplicaSets)
 			case "Jobs":
-				if id >= 0 && id < len(currentJobs) {
-					name = fmt.Sprintf("%s/%s", currentJobs[id].Namespace, currentJobs[id].Name)
-				}
+				validRow = id.Row >= 0 && id.Row < len(currentJobs)
 			case "CronJobs":
-				if id >= 0 && id < len(currentCronJobs) {
-					name = fmt.Sprintf("%s/%s", currentCronJobs[id].Namespace, currentCronJobs[id].Name)
-				}
+				validRow = id.Row >= 0 && id.Row < len(currentCronJobs)
 			case "ConfigMaps":
-				if id >= 0 && id < len(currentConfigMaps) {
-					name = fmt.Sprintf("%s/%s", currentConfigMaps[id].Namespace, currentConfigMaps[id].Name)
-				}
+				validRow = id.Row >= 0 && id.Row < len(currentConfigMaps)
 			case "Secrets":
-				if id >= 0 && id < len(currentSecrets) {
-					name = fmt.Sprintf("%s/%s", currentSecrets[id].Namespace, currentSecrets[id].Name)
-				}
+				validRow = id.Row >= 0 && id.Row < len(currentSecrets)
 			case "Services":
-				if id >= 0 && id < len(currentServices) {
-					name = fmt.Sprintf("%s/%s", currentServices[id].Namespace, currentServices[id].Name)
-				}
+				validRow = id.Row >= 0 && id.Row < len(currentServices)
 			case "Ingresses":
-				if id >= 0 && id < len(currentIngresses) {
-					name = fmt.Sprintf("%s/%s", currentIngresses[id].Namespace, currentIngresses[id].Name)
-				}
-			case "ServiceAccounts":
-				if id >= 0 && id < len(currentServiceAccounts) {
-					name = fmt.Sprintf("%s/%s", currentServiceAccounts[id].Namespace, currentServiceAccounts[id].Name)
-					if currentServiceAccounts[id].Namespace == "" {
-						name = currentServiceAccounts[id].Name
-					}
-				}
-			case "Roles":
-				if id >= 0 && id < len(currentRoles) {
-					name = fmt.Sprintf("%s/%s", currentRoles[id].Namespace, currentRoles[id].Name)
-					if currentRoles[id].Namespace == "" {
-						name = currentRoles[id].Name
-					}
-				}
-			case "RoleBindings":
-				if id >= 0 && id < len(currentRoleBindings) {
-					name = fmt.Sprintf("%s/%s", currentRoleBindings[id].Namespace, currentRoleBindings[id].Name)
-				}
-			case "ClusterRoles":
-				if id >= 0 && id < len(currentClusterRoles) {
-					name = currentClusterRoles[id].Name
-				}
-			case "ClusterRoleBindings":
-				if id >= 0 && id < len(currentClusterRoleBindings) {
-					name = currentClusterRoleBindings[id].Name
-				}
-			case "PersistentVolumes":
-				if id >= 0 && id < len(currentPersistentVolumes) {
-					name = currentPersistentVolumes[id].Name
-				}
-			case "PersistentVolumeClaims":
-				if id >= 0 && id < len(currentPersistentVolumeClaims) {
-					name = fmt.Sprintf("%s/%s", currentPersistentVolumeClaims[id].Namespace, currentPersistentVolumeClaims[id].Name)
-				}
-			case "StorageClasses":
-				if id >= 0 && id < len(currentStorageClasses) {
-					name = currentStorageClasses[id].Name
-				}
+				validRow = id.Row >= 0 && id.Row < len(currentIngresses)
 			case "System Workloads":
-				if id >= 0 && id < len(currentSystemWorkloads) {
-					name = currentSystemWorkloads[id]
-				}
+				validRow = id.Row >= 0 && id.Row < len(currentSystemWorkloads)
 			}
+
+			if validRow {
+				// Отримуємо дані для конкретної колонки (id.Col)
+				switch resType {
+				case "Namespaces":
+					ns := currentNamespaces[id.Row]
+					switch id.Col {
+					case 0:
+						dataStr = ns.Name
+					case 1:
+						dataStr = string(ns.Status.Phase)
+					case 2:
+						dataStr = formatAge(ns.CreationTimestamp)
+					}
+				case "Nodes":
+					node := currentNodes[id.Row]
+					switch id.Col {
+					case 0:
+						dataStr = node.Name
+					case 1:
+						dataStr = formatNodeStatus(node.Status.Conditions)
+					case 2:
+						dataStr = formatNodeRoles(node.Labels)
+					case 3:
+						dataStr = node.Status.NodeInfo.KubeletVersion
+					}
+				case "Pods":
+					pod := currentPods[id.Row]
+					switch id.Col {
+					case 0:
+						dataStr = pod.Name
+					case 1:
+						dataStr = pod.Namespace
+					case 2:
+						dataStr = formatPodContainers(pod.Status.ContainerStatuses)
+					case 3:
+						dataStr = formatPodRestarts(pod.Status.ContainerStatuses)
+					case 4:
+						dataStr = formatOwnerRefs(pod.OwnerReferences)
+					case 5:
+						dataStr = pod.Spec.NodeName
+					case 6:
+						dataStr = string(pod.Status.QOSClass)
+					case 7:
+						dataStr = formatAge(pod.CreationTimestamp)
+					case 8:
+						dataStr = string(pod.Status.Phase)
+					}
+				case "Deployments":
+					dep := currentDeployments[id.Row]
+					switch id.Col {
+					case 0:
+						dataStr = dep.Name
+					case 1:
+						dataStr = dep.Namespace
+					case 2:
+						dataStr = fmt.Sprintf("%d/%d", dep.Status.ReadyReplicas, *dep.Spec.Replicas)
+					case 3:
+						dataStr = formatAge(dep.CreationTimestamp)
+					}
+				case "StatefulSets":
+					sts := currentStatefulSets[id.Row]
+					switch id.Col {
+					case 0:
+						dataStr = sts.Name
+					case 1:
+						dataStr = sts.Namespace
+					case 2:
+						dataStr = fmt.Sprintf("%d/%d", sts.Status.ReadyReplicas, *sts.Spec.Replicas)
+					case 3:
+						dataStr = formatAge(sts.CreationTimestamp)
+					}
+				case "DaemonSets":
+					ds := currentDaemonSets[id.Row]
+					switch id.Col {
+					case 0:
+						dataStr = ds.Name
+					case 1:
+						dataStr = ds.Namespace
+					case 2:
+						dataStr = fmt.Sprintf("%d", ds.Status.DesiredNumberScheduled)
+					case 3:
+						dataStr = fmt.Sprintf("%d", ds.Status.CurrentNumberScheduled)
+					case 4:
+						dataStr = fmt.Sprintf("%d", ds.Status.NumberReady)
+					}
+				case "ReplicaSets":
+					rs := currentReplicaSets[id.Row]
+					switch id.Col {
+					case 0:
+						dataStr = rs.Name
+					case 1:
+						dataStr = rs.Namespace
+					case 2:
+						dataStr = fmt.Sprintf("%d", *rs.Spec.Replicas)
+					case 3:
+						dataStr = fmt.Sprintf("%d", rs.Status.Replicas)
+					case 4:
+						dataStr = fmt.Sprintf("%d", rs.Status.ReadyReplicas)
+					}
+				case "Jobs":
+					job := currentJobs[id.Row]
+					switch id.Col {
+					case 0:
+						dataStr = job.Name
+					case 1:
+						dataStr = job.Namespace
+					case 2:
+						comp := "N/A"
+						if job.Spec.Completions != nil {
+							comp = fmt.Sprintf("%d/%d", job.Status.Succeeded, *job.Spec.Completions)
+						} else {
+							comp = fmt.Sprintf("%d/?", job.Status.Succeeded)
+						}
+						dataStr = comp
+					case 3:
+						dataStr = formatAge(job.CreationTimestamp)
+					}
+				case "CronJobs":
+					cj := currentCronJobs[id.Row]
+					switch id.Col {
+					case 0:
+						dataStr = cj.Name
+					case 1:
+						dataStr = cj.Namespace
+					case 2:
+						dataStr = cj.Spec.Schedule
+					case 3:
+						susp := "False"
+						if cj.Spec.Suspend != nil && *cj.Spec.Suspend {
+							susp = "True"
+						}
+						dataStr = susp
+					case 4:
+						last := "Never"
+						if cj.Status.LastScheduleTime != nil {
+							last = formatAge(*cj.Status.LastScheduleTime)
+						}
+						dataStr = last
+					}
+				case "ConfigMaps":
+					cm := currentConfigMaps[id.Row]
+					switch id.Col {
+					case 0:
+						dataStr = cm.Name
+					case 1:
+						dataStr = cm.Namespace
+					case 2:
+						dataStr = fmt.Sprintf("%d", len(cm.Data))
+					}
+				case "Secrets":
+					secret := currentSecrets[id.Row]
+					switch id.Col {
+					case 0:
+						dataStr = secret.Name
+					case 1:
+						dataStr = secret.Namespace
+					case 2:
+						dataStr = string(secret.Type)
+					case 3:
+						dataStr = fmt.Sprintf("%d", len(secret.Data))
+					}
+				case "Services":
+					svc := currentServices[id.Row]
+					switch id.Col {
+					case 0:
+						dataStr = svc.Name
+					case 1:
+						dataStr = svc.Namespace
+					case 2:
+						dataStr = string(svc.Spec.Type)
+					case 3:
+						dataStr = strings.Join(svc.Spec.ClusterIPs, ",")
+					case 4:
+						dataStr = formatPorts(svc.Spec.Ports)
+					}
+				case "Ingresses":
+					ing := currentIngresses[id.Row]
+					switch id.Col {
+					case 0:
+						dataStr = ing.Name
+					case 1:
+						dataStr = ing.Namespace
+					case 2:
+						class := "<default>"
+						if ing.Spec.IngressClassName != nil {
+							class = *ing.Spec.IngressClassName
+						}
+						dataStr = class
+					case 3:
+						dataStr = formatIngressHosts(ing.Spec.Rules)
+					}
+				case "System Workloads":
+					if id.Col == 0 {
+						dataStr = currentSystemWorkloads[id.Row]
+					}
+				}
+			} else {
+				logDebug("Спроба оновити недійсну клітинку: Row %d, Col %d (Type: %s)", id.Row, id.Col, resType)
+			} // Змінено на Trace
 			stateMu.RUnlock()
-			item.(*widget.Label).SetText(name)
+			label.SetText(dataStr)
 		},
 	)
-	resourceListWidget.OnSelected = func(id widget.ListItemID) {
+
+	// Обробник вибору рядка в таблиці (тепер використовує resourceTable)
+	resourceTable.OnSelected = func(id widget.TableCellID) {
+		row := id.Row // Нам потрібен лише індекс рядка
+		logDebug("Вибрано рядок таблиці: %d", row)
+
 		stateMu.RLock()
 		resType := selectedResourceType
-		var obj interface{}                        // Узагальнений об'єкт
-		var resourceName, resourceNamespace string // Ім'я для заглушки/логування
-		var fullIdentifier string                  // Для System Workloads
-		// Отримуємо повний об'єкт зі зрізу
+		var obj interface{}
+		var resourceName, resourceNamespace string
+		var fullIdentifier string
+
 		switch resType {
 		case "Namespaces":
-			if id >= 0 && id < len(currentNamespaces) {
-				obj = currentNamespaces[id]
-				resourceName = currentNamespaces[id].Name
+			if row >= 0 && row < len(currentNamespaces) {
+				obj = currentNamespaces[row]
+				resourceName = currentNamespaces[row].Name
+				resourceNamespace = ""
 			}
 		case "Nodes":
-			if id >= 0 && id < len(currentNodes) {
-				obj = currentNodes[id]
-				resourceName = currentNodes[id].Name
+			if row >= 0 && row < len(currentNodes) {
+				obj = currentNodes[row]
+				resourceName = currentNodes[row].Name
+				resourceNamespace = ""
 			}
 		case "Pods":
-			if id >= 0 && id < len(currentPods) {
-				obj = currentPods[id]
-				resourceName = currentPods[id].Name
+			if row >= 0 && row < len(currentPods) {
+				obj = currentPods[row]
+				resourceName = currentPods[row].Name
+				resourceNamespace = currentPods[row].Namespace
 			}
 		case "Deployments":
-			if id >= 0 && id < len(currentDeployments) {
-				obj = currentDeployments[id]
-				resourceName = currentDeployments[id].Name
+			if row >= 0 && row < len(currentDeployments) {
+				obj = currentDeployments[row]
+				resourceName = currentDeployments[row].Name
+				resourceNamespace = currentDeployments[row].Namespace
 			}
 		case "StatefulSets":
-			if id >= 0 && id < len(currentStatefulSets) {
-				obj = currentStatefulSets[id]
-				resourceName = currentStatefulSets[id].Name
+			if row >= 0 && row < len(currentStatefulSets) {
+				obj = currentStatefulSets[row]
+				resourceName = currentStatefulSets[row].Name
+				resourceNamespace = currentStatefulSets[row].Namespace
 			}
 		case "DaemonSets":
-			if id >= 0 && id < len(currentDaemonSets) {
-				obj = currentDaemonSets[id]
-				resourceName = currentDaemonSets[id].Name
+			if row >= 0 && row < len(currentDaemonSets) {
+				obj = currentDaemonSets[row]
+				resourceName = currentDaemonSets[row].Name
+				resourceNamespace = currentDaemonSets[row].Namespace
 			}
 		case "ReplicaSets":
-			if id >= 0 && id < len(currentReplicaSets) {
-				obj = currentReplicaSets[id]
-				resourceName = currentReplicaSets[id].Name
+			if row >= 0 && row < len(currentReplicaSets) {
+				obj = currentReplicaSets[row]
+				resourceName = currentReplicaSets[row].Name
+				resourceNamespace = currentReplicaSets[row].Namespace
 			}
 		case "Jobs":
-			if id >= 0 && id < len(currentJobs) {
-				obj = currentJobs[id]
-				resourceName = currentJobs[id].Name
+			if row >= 0 && row < len(currentJobs) {
+				obj = currentJobs[row]
+				resourceName = currentJobs[row].Name
+				resourceNamespace = currentJobs[row].Namespace
 			}
 		case "CronJobs":
-			if id >= 0 && id < len(currentCronJobs) {
-				obj = currentCronJobs[id]
-				resourceName = currentCronJobs[id].Name
+			if row >= 0 && row < len(currentCronJobs) {
+				obj = currentCronJobs[row]
+				resourceName = currentCronJobs[row].Name
+				resourceNamespace = currentCronJobs[id.Row].Namespace
 			}
 		case "ConfigMaps":
-			if id >= 0 && id < len(currentConfigMaps) {
-				obj = currentConfigMaps[id]
-				resourceName = currentConfigMaps[id].Name
+			if row >= 0 && row < len(currentConfigMaps) {
+				obj = currentConfigMaps[row]
+				resourceName = currentConfigMaps[row].Name
+				resourceNamespace = currentConfigMaps[row].Namespace
 			}
 		case "Secrets":
-			if id >= 0 && id < len(currentSecrets) {
-				obj = currentSecrets[id]
-				resourceName = currentSecrets[id].Name
+			if row >= 0 && row < len(currentSecrets) {
+				obj = currentSecrets[row]
+				resourceName = currentSecrets[row].Name
+				resourceNamespace = currentSecrets[row].Namespace
 			}
 		case "Services":
-			if id >= 0 && id < len(currentServices) {
-				obj = currentServices[id]
-				resourceName = currentServices[id].Name
+			if row >= 0 && row < len(currentServices) {
+				obj = currentServices[row]
+				resourceName = currentServices[row].Name
+				resourceNamespace = currentServices[row].Namespace
 			}
 		case "Ingresses":
-			if id >= 0 && id < len(currentIngresses) {
-				obj = currentIngresses[id]
-				resourceName = currentIngresses[id].Name
-			}
-		case "ServiceAccounts":
-			if id >= 0 && id < len(currentServiceAccounts) {
-				obj = currentServiceAccounts[id]
-				resourceName = currentServiceAccounts[id].Name
-			}
-		case "Roles":
-			if id >= 0 && id < len(currentRoles) {
-				obj = currentRoles[id]
-				resourceName = currentRoles[id].Name
-			}
-		case "RoleBindings":
-			if id >= 0 && id < len(currentRoleBindings) {
-				obj = currentRoleBindings[id]
-				resourceName = currentRoleBindings[id].Name
-			}
-		case "ClusterRoles":
-			if id >= 0 && id < len(currentClusterRoles) {
-				obj = currentClusterRoles[id]
-				resourceName = currentClusterRoles[id].Name
-			}
-		case "ClusterRoleBindings":
-			if id >= 0 && id < len(currentClusterRoleBindings) {
-				obj = currentClusterRoleBindings[id]
-				resourceName = currentClusterRoleBindings[id].Name
-			}
-		case "PersistentVolumes":
-			if id >= 0 && id < len(currentPersistentVolumes) {
-				obj = currentPersistentVolumes[id]
-				resourceName = currentPersistentVolumes[id].Name
-			}
-		case "PersistentVolumeClaims":
-			if id >= 0 && id < len(currentPersistentVolumeClaims) {
-				obj = currentPersistentVolumeClaims[id]
-				resourceName = currentPersistentVolumeClaims[id].Name
-			}
-		case "StorageClasses":
-			if id >= 0 && id < len(currentStorageClasses) {
-				obj = currentStorageClasses[id]
-				resourceName = currentStorageClasses[id].Name
+			if row >= 0 && row < len(currentIngresses) {
+				obj = currentIngresses[row]
+				resourceName = currentIngresses[row].Name
+				resourceNamespace = currentIngresses[row].Namespace
 			}
 		case "System Workloads":
-			if id >= 0 && id < len(currentSystemWorkloads) {
-				fullIdentifier = currentSystemWorkloads[id] // Отримуємо "type/name"
+			if row >= 0 && row < len(currentSystemWorkloads) {
+				fullIdentifier = currentSystemWorkloads[row]
 				parts := strings.SplitN(fullIdentifier, "/", 2)
 				if len(parts) == 2 {
-					// Зберігаємо тип і ім'я для заглушки
-					// Зауважте: реальний тип K8s тут "deploy", "ds", "sts", а не "System Workloads"
 					resourceName = parts[1]
-					resourceNamespace = "kube-system" // Ми шукали тільки тут
+					resourceNamespace = "kube-system"
+				} else {
+					resourceName = fullIdentifier
+					resourceNamespace = "kube-system"
 				}
 			}
 		default:
@@ -2368,47 +2666,67 @@ func main() {
 		}
 		stateMu.RUnlock()
 
-		if resType == "System Workloads" && resourceName != "" {
-			// Для системних ворклоадів поки завжди показуємо заглушку
-			// Передаємо розпарсений тип ("deploy", "ds", ...) та ім'я
-			buildNotImplementedDetailsView(resType+" component", fullIdentifier) // Уточнений текст для заглушки
-		} else if obj != nil { // Для стандартних типів, де ми маємо об'єкт
+		if resourceName != "" {
 			fullName := resourceName
-			if resourceNamespace != "" {
+			if resourceNamespace != "" && resType != "Namespaces" && resType != "Nodes" {
 				fullName = resourceNamespace + "/" + fullName
 			}
 			logInfo("Вибрано ресурс '%s': %s", resType, fullName)
 			if statusBar != nil {
 				statusBar.SetText(fmt.Sprintf("Вибрано %s: %s", resType, fullName))
 			}
-			displayResourceDetails(resType, obj) // Викликаємо універсальний диспетчер
-		} else {
-			logWarning("Не вдалося отримати об'єкт для вибраного ресурсу типу '%s', ID: %d", resType, id)
-		}
 
-		if obj != nil {
-			fullName := resourceName
-			// Спробуємо отримати неймспейс, якщо він є у об'єкта (потрібно буде додати для інших типів при потребі)
-			if nsGetter, ok := obj.(interface{ GetNamespace() string }); ok {
-				if ns := nsGetter.GetNamespace(); ns != "" {
-					fullName = ns + "/" + resourceName
+			if resType == "System Workloads" {
+				parts := strings.SplitN(fullIdentifier, "/", 2)
+				if len(parts) == 2 {
+					go fetchAndDisplayResourceDetails(parts[0], resourceNamespace, resourceName)
+				} else {
+					logError("Неправильний формат ідентифікатора: %s", fullIdentifier)
+					detailWidget := buildErrorDetailsView(resType, fullIdentifier, errors.New("неправильний формат ідентифікатора"))
+					if rightPanelContainer != nil {
+						rightPanelContainer.Objects = []fyne.CanvasObject{detailWidget}
+						rightPanelContainer.Refresh()
+					}
+				}
+			} else if obj != nil {
+				displayResourceDetails(resType, obj)
+			} else {
+				logError("Об'єкт '%s' не знайдено: %s", resType, fullName)
+				detailWidget := buildErrorDetailsView(resType, fullName, errors.New("внутрішня помилка: об'єкт не знайдено"))
+				if rightPanelContainer != nil && detailWidget != nil {
+					rightPanelContainer.Objects = []fyne.CanvasObject{detailWidget}
+					rightPanelContainer.Refresh()
 				}
 			}
-			logInfo("Вибрано ресурс '%s': %s", resType, fullName)
-			if statusBar != nil {
-				statusBar.SetText(fmt.Sprintf("Вибрано %s: %s", resType, fullName))
-			}
-			// Викликаємо універсальну функцію показу деталей
-			displayResourceDetails(resType, obj)
 		} else {
-			logWarning("Не вдалося отримати об'єкт для вибраного ресурсу типу '%s', ID: %d", resType, id)
+			logWarning("Не вдалося отримати ідентифікатор для вибраного рядка типу '%s', Row: %d", resType, row)
 		}
+		resourceTable.Unselect(id) // Знімаємо візуальне виділення з таблиці
 	}
 
 	// --- Збираємо макет вікна ---
 	leftPanelContent := container.NewVSplit(container.NewBorder(container.NewPadded(widget.NewLabel("Контексти:")), nil, nil, nil, contextListWidget), container.NewBorder(container.NewPadded(widget.NewLabel("Ресурси:")), nil, nil, nil, resourceTypeTree))
 	leftPanelContent.Offset = 0.5
-	rightPanelContainer = container.NewStack(resourceListWidget)
+
+	// --- Права панель з Заголовком і Таблицею ---
+	// TODO: Зробити headerRow динамічним
+	headerRow := container.NewHBox(
+		widget.NewLabelWithStyle("Col 1", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+		widget.NewLabelWithStyle("Col 2", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+		widget.NewLabelWithStyle("Col 3", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+		widget.NewLabelWithStyle("Col 4", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+		widget.NewLabelWithStyle("Col 5", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+		widget.NewLabelWithStyle("Col 6", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+		widget.NewLabelWithStyle("Col 7", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+		widget.NewLabelWithStyle("Col 8", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+		widget.NewLabelWithStyle("Col 9", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
+	)
+	// Створюємо контейнер для таблиці та її заголовка
+	// Важливо: resourceTable має бути ініціалізований ДО цього моменту
+	resourceTableContainer := container.NewBorder(headerRow, nil, nil, nil, resourceTable)
+	// -----------------------------------------
+
+	rightPanelContainer = container.NewMax(resourceTableContainer) // Починаємо з таблиці
 	tappableRightPanel := &tappableContainer{content: rightPanelContainer}
 	tappableRightPanel.ExtendBaseWidget(tappableRightPanel)
 	split := container.NewHSplit(leftPanelContent, tappableRightPanel)
@@ -2416,13 +2734,9 @@ func main() {
 	mainLayout := container.NewBorder(container.NewVBox(currentContextLabel, widget.NewSeparator()), statusBar, nil, nil, split)
 	mainWindow.SetContent(mainLayout)
 
-	mainWindow.Resize(fyne.NewSize(900, 700))
-	mainWindow.CenterOnScreen()
-	mainWindow.SetCloseIntercept(func() {
-		logInfo("Закриття вікна...")
-		stopFileWatcher() // <<<--- ЗУПИНЯЄМО МОНІТОРИНГ ПЕРЕД ВИХОДОМ
-		fyneApp.Quit()
-	})
+	mainWindow.Resize(fyne.NewSize(1024, 768))
+	mainWindow.CenterOnScreen()                                                                                    // Збільшимо ще
+	mainWindow.SetCloseIntercept(func() { logInfo("Закриття вікна..."); /* stopFileWatcher(); */ fyneApp.Quit() }) // Повернемо stopFileWatcher, коли буде активний
 
 	go loadAndUpdateState()
 	mainWindow.ShowAndRun()
