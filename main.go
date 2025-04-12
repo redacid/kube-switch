@@ -51,6 +51,7 @@ const labelError = "Помилка"
 const labelNoContext = "Немає контексту"
 const labelBackToList = "<- Назад до списку"
 const appTitle = "Go Kube Manager (Lens Clone) - Step 8"
+const appID = "goLENS-redacid"
 
 var (
 	fyneApp             fyne.App
@@ -115,6 +116,7 @@ var (
 	// Моніторинг файлу
 	watcher     *fsnotify.Watcher
 	watcherDone chan bool
+	watcherWg   sync.WaitGroup
 )
 
 // Мапи для дерева ресурсів
@@ -1720,9 +1722,10 @@ func setupFileWatcher() {
 
 	logInfo("Запущено моніторинг файлу: %s (відстеження змін у %s)", watchDir, filepath.Base(cfgFile))
 	watcherDone = make(chan bool)
-
+	watcherWg.Add(1)
 	// Запускаємо горутину для обробки подій
 	go func() {
+		defer watcherWg.Done()
 		debounceTimer := time.NewTimer(time.Hour)
 		debounceTimer.Stop() // Неактивний спочатку
 		const debounceDuration = 750 * time.Millisecond
@@ -1763,7 +1766,13 @@ func setupFileWatcher() {
 	}()
 }
 func stopFileWatcher() {
-	if watcher != nil && watcherDone != nil {
+	// Використовуємо м'ютекс, щоб уникнути гонки при перевірці/встановленні nil
+	stateMu.Lock()
+	w := watcher
+	wd := watcherDone
+	stateMu.Unlock()
+
+	if w != nil && wd != nil {
 		logInfo("Зупинка file watcher...")
 		// Перевіряємо чи канал вже не закритий перед закриттям
 		select {
@@ -1772,9 +1781,19 @@ func stopFileWatcher() {
 		default:
 			close(watcherDone) // Сигнал горутині зупинитися
 		}
+		// <<<--- ДОДАНО: Чекаємо, поки горутина моніторингу завершить свою роботу
+		logDebug("Очікування завершення горутини file watcher...")
+		watcherWg.Wait()
+		logDebug("Горутина file watcher завершилася.")
+
+		// ТІЛЬКИ ПІСЛЯ завершення горутини встановлюємо глобальні змінні в nil
+		stateMu.Lock()
 		watcher = nil
 		watcherDone = nil
+		stateMu.Unlock()
 		logInfo("File watcher зупинено.")
+	} else {
+		logDebug("Спроба зупинити file watcher, який не був запущений або вже зупинений.")
 	}
 }
 
@@ -1905,7 +1924,7 @@ func main() {
 
 	initializeLoadingRules()
 	setupFileWatcher()
-	fyneApp = app.New()
+	fyneApp = app.NewWithID(appID)
 
 	// --- Повертаємо налаштування трея ---
 	resIconPng := fyne.NewStaticResource("icon.png", iconData)
