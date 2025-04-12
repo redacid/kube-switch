@@ -397,7 +397,7 @@ func updateUIWidgets() {
 		resourceListWidget.Refresh()
 	}
 
-	//updateSystemTrayMenu()
+	updateSystemTrayMenu()
 
 	if statusBar != nil && !strings.HasPrefix(statusMsg, "Помилка") && !strings.HasPrefix(statusMsg, "Підключення") && !strings.HasPrefix(statusMsg, "Завантаження") {
 		// Оновлено рядок стану
@@ -1517,6 +1517,15 @@ func showWindowContextMenu(pos fyne.Position) {
 	}
 }
 
+// Оновлює меню в треї (якщо трей підтримується)
+func updateSystemTrayMenu() {
+	if desktopApp != nil { // Перевіряємо, чи трей було успішно ініціалізовано
+		logDebug("Оновлення меню системного трея...")
+		trayMenu = buildContextMenu() // Перебудовуємо меню на основі поточного стану
+		desktopApp.SetSystemTrayMenu(trayMenu)
+	}
+}
+
 // --- Універсальна функція-диспетчер для показу деталей ---
 func displayResourceDetails(resType string, resource interface{}) {
 	var detailWidget fyne.CanvasObject
@@ -1610,6 +1619,36 @@ func main() {
 
 	initializeLoadingRules()
 	fyneApp = app.New()
+
+	// --- Повертаємо налаштування трея ---
+	resIconPng := fyne.NewStaticResource("icon.png", iconData)
+	// Перевірка, чи дані іконки завантажились (чи існує icon.png)
+	if len(iconData) == 0 {
+		logWarning("Дані іконки для трея порожні! Перевірте наявність icon.png та директиву //go:embed.")
+		resIconPng = nil // Якщо даних немає, іконку не встановлюємо
+	}
+
+	// Перевіряємо підтримку системного трея та налаштовуємо його
+	if drv, ok := fyneApp.(desktop.App); ok {
+		desktopApp = drv // Зберігаємо для оновлення меню
+		if resIconPng != nil {
+			// Встановлюємо іконку, якщо вона успішно завантажена
+			desktopApp.SetSystemTrayIcon(resIconPng)
+		} else {
+			logWarning("Не вдалося встановити іконку трея: ресурс порожній.")
+			// Можна встановити якусь стандартну іконку Fyne як запасний варіант, якщо потрібно
+			// desktopApp.SetSystemTrayIcon(theme.QuestionIcon())
+		}
+		// Створюємо та встановлюємо початкове меню трея
+		trayMenu = buildContextMenu() // buildContextMenu має бути визначена
+		desktopApp.SetSystemTrayMenu(trayMenu)
+		logInfo("Системний трей налаштовано.")
+	} else {
+		desktopApp = nil // Явно вказуємо, що трей не підтримується
+		logInfo("Системний трей не підтримується цією системою/драйвером.")
+	}
+	// -------------------------------------------
+
 	mainWindow = fyneApp.NewWindow(appTitle)
 	selectedResourceType = "Nodes"
 
