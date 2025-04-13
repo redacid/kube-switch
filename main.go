@@ -1054,152 +1054,159 @@ func formatIngressPorts(tls []networkingv1.IngressTLS) string {
 func updateUIWidgets() {
 	logDebug("Оновлення UI віджетів (Fyne)...")
 	stateMu.RLock()
+	// Отримуємо необхідні дані зі стану (БЕЗ окремих лічильників)
 	ctxFromFile := currentContextName
-	//connCtx := connectedContextName
-	ctxList := allContextNames
+	connCtx := connectedContextName
+	ctxList := allContextNames // Зберігаємо список для подальшого використання
 	resType := selectedResourceType
-	statusMsg := ""
+	statusTextFromState := ""
 	if statusBar != nil {
-		statusMsg = statusBar.Text
+		statusTextFromState = statusBar.Text
 	}
-	// Отримуємо кількість для всіх типів
-	nodesCount := len(currentNodes)
-	nsCount := len(currentNamespaces)
-	podsCount := len(currentPods)
-	deployCount := len(currentDeployments)
-	stsCount := len(currentStatefulSets)
-	dsCount := len(currentDaemonSets)
-	rsCount := len(currentReplicaSets)
-	jobCount := len(currentJobs)
-	cronJobCount := len(currentCronJobs)
-	cmCount := len(currentConfigMaps)
-	secretCount := len(currentSecrets)
-	svcCount := len(currentServices)
-	ingCount := len(currentIngresses)
-	// Access Control Counts
-	saCount := len(currentServiceAccounts)
-	roleCount := len(currentRoles)
-	roleBindingCount := len(currentRoleBindings)
-	clusterRoleCount := len(currentClusterRoles)
-	clusterRoleBindingCount := len(currentClusterRoleBindings)
-	// Storage Counts
-	pvCount := len(currentPersistentVolumes)
-	pvcCount := len(currentPersistentVolumeClaims)
-	scCount := len(currentStorageClasses)
-	sysWorkloadCount := len(currentSystemWorkloads)
+	// ---> ВИДАЛЕНО ОГОЛОШЕННЯ ...Count змінних <---
+	stateMu.RUnlock() // Розблоковуємо після читання основного стану
 
-	stateMu.RUnlock()
-
+	// --- Оновлення мітки поточного контексту ---
 	displayCtxFromFile := labelNoContext
 	if ctxFromFile != "" {
 		displayCtxFromFile = getDisplayName(ctxFromFile)
 	}
 	if currentContextLabel != nil {
-		fyne.Do(func() {
+		queueUIUpdate(func() {
 			currentContextLabel.SetText("Поточний у файлі: " + displayCtxFromFile)
 		})
 	}
 
-	if contextListWidget != nil { /* ... оновлення списку контекстів ... */
-		fyne.Do(func() {
-			contextListWidget.Refresh()
-		})
-		//targetSelection := connCtx
-		//if targetSelection == "" {
-		//	targetSelection = ctxFromFile
-		//}
-		//selectedIndex := -1
-		//for i, name := range ctxList {
-		//	if name == targetSelection {
-		//		selectedIndex = i
-		//		break
-		//	}
-		//}
-		//if selectedIndex != -1 {
-		//	contextListWidget.Select(selectedIndex)
-		//} else {
-		//	contextListWidget.UnselectAll()
-		//}
-	}
-	if resourceTypeTree != nil {
-		fyne.Do(func() {
-			resourceTypeTree.Refresh()
-		})
-		if resType != "" {
-			resourceTypeTree.Select(resType)
-		} else {
-			fyne.Do(func() {
-				resourceTypeTree.UnselectAll()
-			})
+	// --- Оновлення списку контекстів та виділення ---
+	if contextListWidget != nil {
+		targetSelection := connCtx
+		if targetSelection == "" {
+			targetSelection = ctxFromFile
 		}
+		selectedIndex := -1
+		if targetSelection != "" {
+			// ctxList вже прочитано вище під м'ютексом
+			for i, name := range ctxList {
+				if name == targetSelection {
+					selectedIndex = i
+					break
+				}
+			}
+		}
+		queueUIUpdate(func() {
+			contextListWidget.Refresh()
+			if selectedIndex != -1 {
+				contextListWidget.Select(selectedIndex)
+			} else {
+				contextListWidget.UnselectAll()
+			}
+		})
 	}
 
-	resourceCount := 0
+	// --- Оновлення дерева типів ресурсів ---
+	if resourceTypeTree != nil {
+		queueUIUpdate(func() {
+			resourceTypeTree.Refresh()
+			if resType != "" {
+				resourceTypeTree.Select(resType)
+			} else {
+				resourceTypeTree.UnselectAll()
+			}
+		})
+	}
+
+	// --- Оновлення таблиці ресурсів та ПІДРАХУНОК КІЛЬКОСТІ ---
+	resourceCount := 0 // Ініціалізуємо тут
 	if resourceTable != nil {
-		stateMu.RLock() // Потрібне блокування для читання кількості
+		// Отримуємо кількість ПРЯМО ТУТ, читаючи довжину зрізів під м'ютексом
+		stateMu.RLock() // Блокуємо для читання довжини зрізів
 		switch resType {
 		case "Namespaces":
-			resourceCount = nsCount
+			resourceCount = len(currentNamespaces)
 		case "Nodes":
-			resourceCount = nodesCount
+			resourceCount = len(currentNodes)
 		case "Pods":
-			resourceCount = podsCount
+			resourceCount = len(currentPods)
 		case "Deployments":
-			resourceCount = deployCount
+			resourceCount = len(currentDeployments)
 		case "StatefulSets":
-			resourceCount = stsCount
+			resourceCount = len(currentStatefulSets)
 		case "DaemonSets":
-			resourceCount = dsCount
+			resourceCount = len(currentDaemonSets)
 		case "ReplicaSets":
-			resourceCount = rsCount
+			resourceCount = len(currentReplicaSets)
 		case "Jobs":
-			resourceCount = jobCount
+			resourceCount = len(currentJobs)
 		case "CronJobs":
-			resourceCount = cronJobCount
+			resourceCount = len(currentCronJobs)
 		case "ConfigMaps":
-			resourceCount = cmCount
+			resourceCount = len(currentConfigMaps)
 		case "Secrets":
-			resourceCount = secretCount
+			resourceCount = len(currentSecrets)
 		case "Services":
-			resourceCount = svcCount
+			resourceCount = len(currentServices)
 		case "Ingresses":
-			resourceCount = ingCount
+			resourceCount = len(currentIngresses)
 		case "ServiceAccounts":
-			resourceCount = saCount
+			resourceCount = len(currentServiceAccounts)
 		case "Roles":
-			resourceCount = roleCount
+			resourceCount = len(currentRoles)
 		case "RoleBindings":
-			resourceCount = roleBindingCount
+			resourceCount = len(currentRoleBindings)
 		case "ClusterRoles":
-			resourceCount = clusterRoleCount
+			resourceCount = len(currentClusterRoles)
 		case "ClusterRoleBindings":
-			resourceCount = clusterRoleBindingCount
+			resourceCount = len(currentClusterRoleBindings)
 		case "PersistentVolumes":
-			resourceCount = pvCount
+			resourceCount = len(currentPersistentVolumes)
 		case "PersistentVolumeClaims":
-			resourceCount = pvcCount
+			resourceCount = len(currentPersistentVolumeClaims)
 		case "StorageClasses":
-			resourceCount = scCount
+			resourceCount = len(currentStorageClasses)
 		case "System Workloads":
-			resourceCount = sysWorkloadCount
-		// Додайте інші типи тут...
+			resourceCount = len(currentSystemWorkloads)
 		default:
 			resourceCount = 0
 		}
-		stateMu.RUnlock()
-		logDebug("Оновлення списку ресурсів '%s' у UI (%d елементів)", resType, resourceCount)
-		fyne.Do(func() {
-			resourceTable.Refresh()
-		})
+		stateMu.RUnlock() // Розблоковуємо після читання довжини
+
+		logDebug("Оновлення таблиці ресурсів '%s' у UI (%d елементів)", resType, resourceCount)
+		queueUIUpdate(func() { resourceTable.Refresh() })
 	}
 
+	// --- Оновлення меню трея ---
 	updateSystemTrayMenu()
 
-	if statusBar != nil && !strings.HasPrefix(statusMsg, "Помилка") && !strings.HasPrefix(statusMsg, "Підключення") && !strings.HasPrefix(statusMsg, "Завантаження") {
-		// Оновлено рядок стану
-		fyne.Do(func() {
-			statusBar.SetText(fmt.Sprintf("Контекстів: %d | %s: %d", len(ctxList), resType, resourceCount))
-		})
+	// --- Оновлення статус-бару ---
+	if statusBar != nil {
+		canUpdateStatus := !strings.HasPrefix(statusTextFromState, labelError) &&
+			!strings.HasPrefix(statusTextFromState, "Підключення") &&
+			!strings.HasPrefix(statusTextFromState, labelLoading) &&
+			!strings.HasPrefix(statusTextFromState, "Помилка")
+
+		statusString := ""
+		// Використовуємо раніше зчитані дані (ctxList вже є)
+		if connCtx != "" {
+			statusString = fmt.Sprintf("Підключено: %s | ", getDisplayName(connCtx))
+		} else if ctxFromFile != "" {
+			statusString = fmt.Sprintf("Поточний: %s | ", getDisplayName(ctxFromFile))
+		} else {
+			statusString = "Не підключено | "
+		}
+		statusString += fmt.Sprintf("Контекстів: %d", len(ctxList)) // Використовуємо збережену довжину
+
+		if resType != "" {
+			// Використовуємо resourceCount, розрахований вище
+			statusString += fmt.Sprintf(" | %s: %d", resType, resourceCount)
+		} else if connCtx != "" {
+			statusString += " | Виберіть тип ресурсу"
+		}
+
+		if canUpdateStatus || statusTextFromState == "" || statusTextFromState == labelLoading+"..." {
+			queueUIUpdate(func() { statusBar.SetText(statusString) })
+		} else {
+			logDebug("Збереження поточного статус-бару: %s", statusTextFromState)
+		}
 	}
 	logDebug("Оновлення UI віджетів завершено.")
 }
@@ -2398,15 +2405,15 @@ func buildNotImplementedDetailsView(resourceType, resourceName string) fyne.Canv
 	return container.NewBorder(backButton, nil, nil, nil, container.NewPadded(detailsVBox))
 }
 
-func buildErrorDetailsView(resourceType, resourceName string, err error) fyne.CanvasObject {
-	detailsVBox := container.NewVBox()
-	label := widget.NewLabel(fmt.Sprintf("Помилка завантаження деталей для %s '%s':\n%v", resourceType, resourceName, err))
-	label.Wrapping = fyne.TextWrapWord
-	label.Alignment = fyne.TextAlignCenter
-	detailsVBox.Add(label)
-	backButton := widget.NewButton(labelBackToList, func() { displayResourceTableView() })
-	return container.NewBorder(backButton, nil, nil, nil, container.NewPadded(detailsVBox))
-}
+//func buildErrorDetailsView(resourceType, resourceName string, err error) fyne.CanvasObject {
+//	detailsVBox := container.NewVBox()
+//	label := widget.NewLabel(fmt.Sprintf("Помилка завантаження деталей для %s '%s':\n%v", resourceType, resourceName, err))
+//	label.Wrapping = fyne.TextWrapWord
+//	label.Alignment = fyne.TextAlignCenter
+//	detailsVBox.Add(label)
+//	backButton := widget.NewButton(labelBackToList, func() { displayResourceTableView() })
+//	return container.NewBorder(backButton, nil, nil, nil, container.NewPadded(detailsVBox))
+//}
 
 // Отримує повний об'єкт ресурсу System Workload за типом/іменем/неймспейсом і показує його деталі
 func fetchAndDisplayResourceDetails(resTypePrefix string, namespace string, name string) {
@@ -2651,7 +2658,10 @@ func setupFileWatcher() {
 	watchDir := filepath.Dir(cfgFile)
 	if _, err := os.Stat(watchDir); os.IsNotExist(err) {
 		logError("Директорія для моніторингу '%s' не існує.", watchDir)
-		watcher.Close()
+		werr := watcher.Close()
+		if werr != nil {
+			logError("Не вдалося зупинити file watcher: %v", werr)
+		}
 		watcher = nil
 		return
 	}
@@ -2662,7 +2672,10 @@ func setupFileWatcher() {
 	err = watcher.Add(watchDir)
 	if err != nil {
 		logError("Не вдалося додати шлях '%s' до file watcher: %v", watchDir, err)
-		watcher.Close()
+		werr := watcher.Close()
+		if werr != nil {
+			logError("Не вдалося зупинити file watcher: %v", werr)
+		}
 		watcher = nil
 		return
 	}
@@ -2705,7 +2718,10 @@ func setupFileWatcher() {
 				loadAndUpdateState()
 			case <-watcherDone:
 				logInfo("Зупинка горутини file watcher.")
-				watcher.Close() // Закриваємо сам watcher
+				werr := watcher.Close()
+				if werr != nil {
+					logError("Не вдалося зупинити file watcher: %v", werr)
+				}
 				debounceTimer.Stop()
 				return
 			}
@@ -3120,7 +3136,7 @@ func main() {
 	resourceTable.CreateHeader = func() fyne.CanvasObject {
 		// Використовуємо УНІКАЛЬНИЙ текст для віджета заголовка
 		//return widget.NewLabelWithStyle("HEADER_WIDGET_TEXT", fyne.TextAlignCenter, fyne.TextStyle{Bold: true}) // <-- Змінено тут
-		return widget.NewLabel("Row 000")
+		return widget.NewLabel("000")
 	}
 
 	// Обов'язково: Функція для оновлення ТІЛЬКИ тексту заголовків
@@ -3136,7 +3152,7 @@ func main() {
 		headers := getHeadersForType(resType)
 		if id.Col == -1 {
 			//logDebug("UpdateHeader:id.Col (%d) , id.Row (%d) для заголовків (кількість: %d). Тип ресурсу: %s", id.Col, id.Row, len(headers), resType)
-			label.SetText(fmt.Sprintf("%d", id.Row))
+			label.SetText(fmt.Sprintf("%d", id.Row+1))
 		} else {
 			//logDebug("UpdateHeader:id.Col (%d) , id.Row (%d) для заголовків (кількість: %d). Тип ресурсу: %s", id.Col, id.Row, len(headers), resType)
 			label.SetText(headers[id.Col])
@@ -3154,7 +3170,7 @@ func main() {
 	// Встановлення ширини колонок
 	resourceTable.SetColumnWidth(0, 250)
 	if len(getHeadersForType("Pods")) > 1 {
-		resourceTable.SetColumnWidth(1, 150)
+		resourceTable.SetColumnWidth(1, 250)
 	}
 
 	// --- Обробник вибору рядка таблиці ---
@@ -3374,7 +3390,7 @@ func main() {
 	)
 	leftPanelContent.Offset = 0.4
 
-	rightPanelContainer = container.NewMax(resourceTable) // Починаємо з таблиці
+	rightPanelContainer = container.NewStack(resourceTable) // Починаємо з таблиці
 
 	tappableRightPanel := &tappableContainer{content: rightPanelContainer}
 	tappableRightPanel.ExtendBaseWidget(tappableRightPanel)
