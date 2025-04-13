@@ -46,7 +46,7 @@ go-build:
 	./kube-context-fyne
 
 go-run:
-	go run ./
+	go run ./...
 
 #fyne-cross-build-linux: install_fyne_cross_cmd
 #	fyne-cross linux -app-version $(RELEASE_VERSION) -arch amd64,386,arm,arm64 -icon $(ICON) -metadata Details.Version=$(RELEASE_VERSION) \
