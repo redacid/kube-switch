@@ -4117,7 +4117,7 @@ func main() {
 	)
 	leftPanelContent.Offset = 0.4
 
-	rightPanelContainer = container.NewMax(resourceTable) // Починаємо з таблиці
+	rightPanelContainer = container.NewStack(resourceTable) // Починаємо з таблиці
 
 	tappableRightPanel := &tappableContainer{content: rightPanelContainer}
 	tappableRightPanel.ExtendBaseWidget(tappableRightPanel)
