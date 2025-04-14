@@ -1899,20 +1899,82 @@ func connectLoadAndRefresh(ctxName string) {
 	}
 }
 
-// Показує таблицю ресурсів (resourceTable) у правій панелі
+// Показує таблицю ресурсів з Тулбаром зверху
 func displayResourceTableView() {
-	logDebug("Показ таблиці ресурсів (resourceTable)")
-	if rightPanelContainer != nil && resourceTable != nil {
-		// Переконуємося, що саме resourceTable видимий
-		if len(rightPanelContainer.Objects) == 0 || rightPanelContainer.Objects[0] != resourceTable {
-			rightPanelContainer.Objects = []fyne.CanvasObject{resourceTable}
-		}
-		// Потрібно оновити і саму таблицю, і контейнер Max
-		// Оновлення самої таблиці відбувається через updateUIWidgets -> resourceTable.Refresh()
-		rightPanelContainer.Refresh() // Оновлюємо контейнер
-	} else {
+	logDebug("Показ вигляду таблиці ресурсів з тулбаром")
+	if rightPanelContainer == nil || resourceTable == nil {
 		logError("rightPanelContainer або resourceTable є nil при показі таблиці")
+		return
 	}
+
+	// ---> Створюємо Тулбар з кнопками Оновити та Авторозмір <---
+	toolbar := widget.NewToolbar(
+		// Кнопка Оновити
+		widget.NewToolbarAction(theme.ViewRefreshIcon(), func() {
+			logInfo("Натиснуто кнопку Оновити на тулбарі")
+			stateMu.RLock()
+			currentType := selectedResourceType
+			isConnected := currentClientset != nil
+			contextName := connectedContextName // Отримуємо ім'я контексту для логів
+			stateMu.RUnlock()
+
+			if isConnected && currentType != "" {
+				// Показуємо статус завантаження перед запуском горутини
+				queueUIUpdate(func() {
+					if statusBar != nil {
+						statusBar.SetText(fmt.Sprintf("Оновлення %s для '%s'...", currentType, getDisplayName(contextName)))
+					}
+				})
+				// Перезавантажуємо дані для поточного типу ресурсу в горутині
+				go loadSelectedResources()
+			} else if !isConnected {
+				logWarning("Кнопка Оновити: не підключено до кластера.")
+				queueUIUpdate(func() {
+					if statusBar != nil {
+						statusBar.SetText("Помилка: Не підключено")
+					}
+				})
+			} else { // Підключено, але тип не вибрано
+				logWarning("Кнопка Оновити: не вибрано тип ресурсу.")
+				queueUIUpdate(func() {
+					if statusBar != nil {
+						statusBar.SetText("Спочатку виберіть тип ресурсу")
+					}
+				})
+			}
+		}),
+
+		// Розділювач і Кнопка Авторозміру
+		widget.NewToolbarSeparator(),
+		widget.NewToolbarAction(theme.ZoomFitIcon(), func() { // Іконка "вмістити по ширині"
+			logInfo("Натиснуто кнопку Авторозмір колонок")
+			// Викликаємо функцію авторозміру безпосередньо (вже в UI потоці)
+			autoSizeTableColumns(resourceTable)
+			// Після зміни розмірів колонок таблицю треба оновити, щоб зміни відобразились візуально
+			// resourceTable.Refresh() // Оновлення таблиці відбудеться в updateUIWidgets
+			logInfo("Авторозмір колонок завершено.")
+		}),
+		// Можна додати сюди інші дії...
+	)
+
+	// ---> Створюємо макет: Тулбар зверху, Таблиця в центрі <---
+	tableWithToolbarLayout := container.NewBorder(
+		toolbar,       // Top: наш тулбар
+		nil,           // Bottom
+		nil,           // Left
+		nil,           // Right
+		resourceTable, // Center: сама таблиця
+	)
+
+	// Встановлюємо цей макет в основний правий контейнер
+	// Використовуємо queueUIUpdate для безпечної зміни UI
+	queueUIUpdate(func() {
+		logDebug("Встановлення tableWithToolbarLayout в rightPanelContainer")
+		rightPanelContainer.Objects = []fyne.CanvasObject{tableWithToolbarLayout}
+		rightPanelContainer.Refresh()
+		// Оновлюємо всі віджети (включаючи таблицю та статус-бар)
+		updateUIWidgets()
+	})
 }
 
 // --- Функції для показу деталей ресурсів ---
@@ -3227,6 +3289,96 @@ func displayResourceDetails(resType string, resource interface{}) {
 	}
 }
 
+// Розраховує та встановлює оптимальну ширину для колонок даних таблиці
+func autoSizeTableColumns(table *widget.Table) {
+	if table == nil {
+		logError("autoSizeTableColumns: table is nil")
+		return
+	}
+
+	stateMu.RLock()
+	resType := selectedResourceType
+	stateMu.RUnlock()
+
+	if resType == "" {
+		logWarning("autoSizeTableColumns: Не вибрано тип ресурсу.")
+		return
+	}
+
+	rows, cols := table.Length() // Отримуємо розміри з таблиці
+	if cols <= 0 {
+		logDebug("autoSizeTableColumns: Немає колонок даних для зміни розміру.")
+		return
+	}
+
+	headers := getHeadersForType(resType)
+	// Перевірка на випадок розбіжності кількості заголовків і колонок даних
+	if len(headers) != cols {
+		logWarning("autoSizeTableColumns: Кількість заголовків (%d) не співпадає з кількістю колонок даних (%d) для типу '%s'. Використовується менше значення: %d.", len(headers), cols, resType, min(cols, len(headers)))
+		cols = min(cols, len(headers)) // Обмежуємо кількість колонок
+		if cols <= 0 {
+			return
+		}
+	}
+
+	// ---> ВИКОРИСТОВУЄМО ПРЯМІ ФУНКЦІЇ ПАКЕТУ theme <---
+	padding := theme.Padding() * 2.5 // Отримуємо стандартний відступ Fyne
+	textSize := theme.TextSize()     // Отримуємо стандартний розмір тексту
+	// Не потрібна змінна theme := fyne.CurrentApp().Settings().Theme() для цих значень
+	// ---> КІНЕЦЬ ЗМІН <---
+
+	minWidth := float32(60)         // Мінімальна ширина колонки
+	maxWidthAllowed := float32(650) // Максимальна ширина
+
+	logDebug("Автопідбір ширини для %d колонок даних (тип: %s, рядків: %d, перевірка до 50)", cols, resType, rows)
+
+	for c := 0; c < cols; c++ { // Ітерація по КОЛОНКАХ ДАНИХ
+		currentMaxWidth := minWidth
+
+		// 1. Вимірюємо ширину заголовка
+		headerText := headers[c]
+		// ---> Використовуємо отриманий textSize <---
+		headerSize := fyne.MeasureText(headerText, textSize, fyne.TextStyle{Bold: true})
+		currentMaxWidth = max(currentMaxWidth, headerSize.Width+padding) // Використовуємо max
+
+		// 2. Вимірюємо ширину даних у перших N рядках
+		rowsToCheck := min(rows, 50)
+		for r := 0; r < rowsToCheck; r++ {
+			cellData := formatCellData(resType, r, c)
+			// ---> Використовуємо отриманий textSize <---
+			cellSize := fyne.MeasureText(cellData, textSize, fyne.TextStyle{})
+			currentMaxWidth = max(currentMaxWidth, cellSize.Width+padding) // Використовуємо max
+		}
+
+		// 3. Обмежуємо максимальною шириною
+		if currentMaxWidth > maxWidthAllowed {
+			currentMaxWidth = maxWidthAllowed
+		}
+
+		// 4. Встановлюємо ширину колонки даних (індекс c)
+		logDebug("Встановлення ширини для колонки даних %d: %.2f", c, currentMaxWidth)
+		table.SetColumnWidth(c, currentMaxWidth)
+	}
+	logInfo("Автопідбір ширини колонок завершено для типу '%s'.", resType)
+}
+
+// Допоміжна функція min (якщо використовуєте Go < 1.21)
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+// Допоміжна функція max для float32 (якщо використовуєте Go < 1.21)
+// В Go 1.21+ використовуйте вбудовану `max()`
+func max(a, b float32) float32 {
+	if a > b {
+		return a
+	}
+	return b
+}
+
 // Показує огляд кластера (поки що лише версію)
 func displayClusterOverview(serverVersion string) {
 	logDebug("Показ огляду кластера")
@@ -3394,7 +3546,7 @@ func main() {
 				stateMu.Lock()
 				selectedResourceType = id
 				stateMu.Unlock()
-				logDebug("Встановлено selectedResourceType = '%s'", id) // Додано лог
+				logDebug("Встановлено selectedResourceType = '%s'", id)
 				go loadSelectedResources()
 			} else {
 				logDebug("Тип ресурсу '%s' вже вибрано.", id)
@@ -3420,9 +3572,9 @@ func main() {
 	resourceTypeTree.OpenBranch("Configuration")
 	resourceTypeTree.OpenBranch("Access Control")
 
-	// --- Створення таблиці ресурсів (3-аргументний конструктор) ---
+	// --- Створення таблиці ресурсів ---
 	resourceTable = widget.NewTableWithHeaders(
-		// 1. Function to return table size (rows, cols)
+		// 1. Length func
 		func() (int, int) {
 			stateMu.RLock()
 			defer stateMu.RUnlock()
@@ -3432,7 +3584,6 @@ func main() {
 			if cols == 0 {
 				cols = 1
 			}
-
 			switch selectedResourceType {
 			case "Namespaces":
 				rows = len(currentNamespaces)
@@ -3481,18 +3632,16 @@ func main() {
 			default:
 				rows = 0
 			}
-			//logDebug("Table Length func: Type='%s', Rows=%d, Cols=%d", selectedResourceType, rows, cols)
+			// logDebug("Table Length func: Type='%s', Rows=%d, Cols=%d", selectedResourceType, rows, cols)
 			return rows, cols
 		},
-		// ---> ЗМІНЕНО для діагностики <---
-		// 2. Function to create a template DATA cell
+		// 2. CreateCell func
 		func() fyne.CanvasObject {
-			// Використовуємо УНІКАЛЬНИЙ текст для віджета даних
-			l := widget.NewLabel("DATA_CELL_WIDGET") // <-- Змінено тут
+			l := widget.NewLabel("Cell") // Повертаємо нейтральне значення
 			l.Truncation = fyne.TextTruncateEllipsis
 			return l
 		},
-		// 3. Function to update a specific DATA cell
+		// 3. UpdateCell func
 		func(id widget.TableCellID, cell fyne.CanvasObject) {
 			label, ok := cell.(*widget.Label)
 			if !ok {
@@ -3506,65 +3655,84 @@ func main() {
 			dataStr := formatCellData(resType, id.Row, id.Col)
 			label.SetText(dataStr)
 		},
-	) // Кінець 3-аргументного конструктора
+	) // Кінець конструктора
 
-	// --- Налаштування заголовків ПІСЛЯ створення таблиці ---
-	resourceTable.ShowHeaderRow = true // Вмикаємо рядок заголовків
+	// --- Налаштування заголовків ---
+	resourceTable.ShowHeaderRow = true
 	resourceTable.ShowHeaderColumn = true
 
-	// ---> ЗМІНЕНО для діагностики <---
-	// Створюємо шаблон для клітинки заголовка з УНІКАЛЬНИМ текстом
+	// CreateHeader повертає Label
 	resourceTable.CreateHeader = func() fyne.CanvasObject {
-		// Використовуємо УНІКАЛЬНИЙ текст для віджета заголовка
-		//return widget.NewLabelWithStyle("HEADER_WIDGET_TEXT", fyne.TextAlignCenter, fyne.TextStyle{Bold: true}) // <-- Змінено тут
-		return widget.NewLabel("000")
+		// Повертаємо просту мітку як шаблон. UpdateHeader змінить її текст/стиль.
+		return widget.NewLabel("Hdr") // Початковий текст не важливий
 	}
 
-	// Обов'язково: Функція для оновлення ТІЛЬКИ тексту заголовків
+	// UpdateHeader працює з Label, кутова клітинка - порожня
 	resourceTable.UpdateHeader = func(id widget.TableCellID, template fyne.CanvasObject) {
 		label, ok := template.(*widget.Label)
 		if !ok {
 			logError("Header template was not a *widget.Label")
+			if container, okContainer := template.(*fyne.Container); okContainer {
+				container.Objects = nil
+				container.Refresh()
+			}
 			return
 		}
-		stateMu.RLock()
-		resType := selectedResourceType
-		stateMu.RUnlock()
-		headers := getHeadersForType(resType)
-		if id.Col == -1 {
-			//logDebug("UpdateHeader:id.Col (%d) , id.Row (%d) для заголовків (кількість: %d). Тип ресурсу: %s", id.Col, id.Row, len(headers), resType)
-			label.SetText(fmt.Sprintf("%d", id.Row+1))
+
+		label.TextStyle = fyne.TextStyle{}
+		label.Alignment = fyne.TextAlignLeading
+
+		if id.Row == -1 && id.Col == -1 {
+			// --- Кутова клітинка (-1, -1) ---
+			label.SetText("") // Робимо порожньою
+
+		} else if id.Row >= 0 && id.Col == -1 {
+			// --- Колонка номерів рядків (Row >= 0, Col == -1) ---
+			label.Alignment = fyne.TextAlignCenter
+			label.SetText(fmt.Sprintf("%d", id.Row))
+
+		} else if id.Row == -1 && id.Col >= 0 {
+			// --- Рядок назв колонок (Row == -1, Col >= 0) ---
+			label.Alignment = fyne.TextAlignCenter
+			label.TextStyle = fyne.TextStyle{Bold: true}
+
+			stateMu.RLock()
+			resType := selectedResourceType
+			stateMu.RUnlock()
+			headers := getHeadersForType(resType)
+
+			headerText := fmt.Sprintf("Col %d?", id.Col)
+			if id.Col < len(headers) {
+				headerText = headers[id.Col]
+			} else {
+				logWarning("UpdateHeader: Invalid id.Col (%d) for column headers (count: %d). Type: %s", id.Col, len(headers), resType)
+			}
+			label.SetText(headerText)
+
 		} else {
-			//logDebug("UpdateHeader:id.Col (%d) , id.Row (%d) для заголовків (кількість: %d). Тип ресурсу: %s", id.Col, id.Row, len(headers), resType)
-			label.SetText(headers[id.Col])
+			logWarning("UpdateHeader: Received unexpected ID (Row=%d, Col=%d)", id.Row, id.Col)
+			label.SetText("?")
 		}
-		//if id.Col >= 0 && id.Col < len(headers) {
-		//	logInfo("UpdateHeader:id.Col (%d) , id.Row (%d) для заголовків (кількість: %d). Тип ресурсу: %s", id.Col, id.Row, len(headers), resType)
-		//	label.SetText(headers[id.Col])
-		//} else {
-		//	logWarning("UpdateHeader: Некоректний id.Col (%d) для заголовків (кількість: %d). Тип ресурсу: %s", id.Col, len(headers), resType)
-		//	label.SetText(fmt.Sprintf("HCol %d?", id.Col))
-		//}
 	}
 	// --- Кінець налаштування заголовків ---
 
 	// Встановлення ширини колонок
-	resourceTable.SetColumnWidth(0, 250)
-	if len(getHeadersForType("Pods")) > 1 {
-		resourceTable.SetColumnWidth(1, 250)
-	}
+	resourceTable.SetColumnWidth(0, 250) // Name column
+	resourceTable.SetColumnWidth(1, 150) // 2nd data column
 
-	// --- Обробник вибору рядка таблиці ---
+	// Обробник вибору рядка
 	resourceTable.OnSelected = func(id widget.TableCellID) {
 		row := id.Row
-		logDebug("Вибрано рядок таблиці: %d", row)
+		col := id.Col
+		logDebug("Вибрано клітинку даних таблиці: Row=%d, Col=%d", row, col)
+
 		stateMu.RLock()
 		resType := selectedResourceType
 		var obj interface{}
 		var resourceName, resourceNamespace, fullIdentifier string
 		validSelection := false
 
-		switch resType { // Логіка отримання об'єкта за рядком
+		switch resType { // Отримання об'єкта K8s за рядком `row` (індекс даних)
 		case "Namespaces":
 			if row >= 0 && row < len(currentNamespaces) {
 				obj = currentNamespaces[row]
@@ -3724,7 +3892,7 @@ func main() {
 		}
 		stateMu.RUnlock()
 
-		if validSelection { // Логіка показу деталей або помилки
+		if validSelection { // Логіка показу деталей
 			fullName := resourceName
 			if resourceNamespace != "" && resType != "Namespaces" && resType != "Nodes" && resType != "PersistentVolumes" && resType != "StorageClasses" && resType != "ClusterRoles" && resType != "ClusterRoleBindings" {
 				fullName = resourceNamespace + "/" + fullName
@@ -3742,7 +3910,7 @@ func main() {
 					go fetchAndDisplayResourceDetails(parts[0], resourceNamespace, resourceName)
 				} else {
 					queueUIUpdate(func() {
-						displayResourceDetails("Error", fmt.Errorf("неправильний формат ідентифікатора '%s'", fullIdentifier))
+						displayResourceDetails("Error", fmt.Errorf("неправильний формат '%s'", fullIdentifier))
 					})
 				}
 			} else if obj != nil {
@@ -3750,7 +3918,7 @@ func main() {
 			} else {
 				logError("Внутрішня помилка: Об'єкт nil для '%s' %s (Row: %d)", resType, fullName, row)
 				queueUIUpdate(func() {
-					displayResourceDetails("Error", fmt.Errorf("внутрішня помилка для '%s'", fullName))
+					displayResourceDetails("Error", fmt.Errorf("внутрішня помилка '%s'", fullName))
 				})
 			}
 		} else {
@@ -3761,7 +3929,7 @@ func main() {
 				}
 			})
 		}
-		queueUIUpdate(func() { resourceTable.Unselect(id) }) // Завжди знімаємо виділення
+		queueUIUpdate(func() { resourceTable.Unselect(widget.TableCellID{Row: row, Col: col}) }) // Знімаємо виділення
 	}
 
 	// --- Компонування UI ---
@@ -3771,7 +3939,7 @@ func main() {
 	)
 	leftPanelContent.Offset = 0.4
 
-	rightPanelContainer = container.NewStack(resourceTable) // Починаємо з таблиці
+	rightPanelContainer = container.NewMax(resourceTable) // Починаємо з таблиці
 
 	tappableRightPanel := &tappableContainer{content: rightPanelContainer}
 	tappableRightPanel.ExtendBaseWidget(tappableRightPanel)
