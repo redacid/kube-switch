@@ -120,7 +120,130 @@ var (
 	watcher     *fsnotify.Watcher
 	watcherDone chan bool
 	watcherWg   sync.WaitGroup
+
+	resourceIcons map[string]fyne.Resource
 )
+
+// Ініціалізація мапи іконок для типів ресурсів
+func init() {
+	// --- Константи для стилю іконок з контуром ---
+	const iconFillColor = "#FFFFFF"   // Середньо-сірий для заливки
+	const iconStrokeColor = "#E26D00" // Білий для контуру
+	const iconStrokeWidth = "1.5"     // Товщина контуру
+	const strokeLineJoin = "round"    // Стиль з'єднання ліній
+	// -------------------------------------------
+
+	// Хелпер для створення ресурсу іконки зі стилем
+	createStrokedIcon := func(svgContent string) fyne.Resource {
+		// Додаємо атрибути до першого тегу path або іншого графічного елемента
+		// Це спрощений підхід; може не працювати для складних SVG з групами <g> без fill/stroke
+		// Краще додавати fill/stroke/stroke-width безпосередньо до path/circle/rect в SVG рядку.
+		// Оскільки ми використовуємо fmt.Sprintf, ми ВЖЕ додаємо їх в сам рядок SVG.
+		// Тому ця функція просто форматує рядок і створює ресурс.
+		fullSvg := fmt.Sprintf(svgContent, iconFillColor, iconStrokeColor, iconStrokeWidth, strokeLineJoin)
+		// Ім'я ресурсу не є критичним тут, головне - унікальність для кешування, якщо потрібно
+		// Використаємо перші 10 символів SVG як частину імені
+		resourceName := "stroked_" + svgContent[:min(10, len(svgContent))] + ".svg"
+		return fyne.NewStaticResource(resourceName, []byte(fullSvg))
+	}
+
+	// --- Визначення SVG для всіх іконок (з використанням Material Icons де можливо) ---
+	// Важливо: viewBox="0 0 24 24" для стандартних Material Icons
+	// Атрибути fill='%s' stroke='%s' stroke-width='%s' stroke-linejoin='%s' будуть додані через fmt.Sprintf
+
+	// Cluster Icons
+	svgFolderOpen := `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M20 6h-8l-2-2H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2zm0 12H4V8h16v10z' fill='%s' stroke='%s' stroke-width='%s' stroke-linejoin='%s'/></svg>`
+	svgComputer := `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M20 18c1.1 0 1.99-.9 1.99-2L22 6c0-1.1-.9-2-2-2H4c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2H0v2h24v-2h-4zM4 6h16v10H4V6z' fill='%s' stroke='%s' stroke-width='%s' stroke-linejoin='%s'/></svg>`
+	svgSettings := `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M19.43 12.98c.04-.32.07-.64.07-.98s-.03-.66-.07-.98l2.11-1.65c.19-.15.24-.42.12-.64l-2-3.46c-.12-.22-.39-.3-.61-.22l-2.49 1c-.52-.4-1.08-.73-1.69-.98l-.38-2.65C14.46 2.18 14.25 2 14 2h-4c-.25 0-.46.18-.49.42l-.38 2.65c-.61.25-1.17.59-1.69.98l-2.49-1c-.23-.08-.49 0-.61.22l-2 3.46c-.13.22-.07.49.12.64l2.11 1.65c-.04.32-.07.65-.07.98s.03.66.07.98l-2.11 1.65c-.19.15-.24.42-.12.64l2 3.46c.12.22.39.3.61.22l2.49-1c.52.4 1.08.73 1.69.98l.38 2.65c.03.24.24.42.49.42h4c.25 0 .46-.18.49-.42l.38-2.65c.61-.25 1.17-.59 1.69-.98l2.49 1c.23.08.49 0 .61-.22l2-3.46c.12-.22.07-.49-.12-.64l-2.11-1.65zM12 15.5c-1.93 0-3.5-1.57-3.5-3.5s1.57-3.5 3.5-3.5 3.5 1.57 3.5 3.5-1.57 3.5-3.5 3.5z' fill='%s' stroke='%s' stroke-width='%s' stroke-linejoin='%s'/></svg>`
+
+	// Workload Icons
+	// svgCheckBoxOutlineBlank := `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M19 5v14H5V5h14m0-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2z' fill='%s' stroke='%s' stroke-width='%s' stroke-linejoin='%s'/></svg>`
+	// Використаємо простіший квадрат як іконку для Pods
+	svgCropSquare := `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M18 4H6c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 14H6V6h12v12z' fill='%s' stroke='%s' stroke-width='%s' stroke-linejoin='%s'/></svg>`
+	svgReplay := `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z' fill='%s' stroke='%s' stroke-width='%s' stroke-linejoin='%s'/></svg>`
+	svgStorage := `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M2 20h20v-4H2v4zm2-3h2v2H4v-2zM2 4v4h20V4H2zm4 3H4V5h2v2zm-4 7h20v-4H2v4zm2-3h2v2H4v-2z' fill='%s' stroke='%s' stroke-width='%s' stroke-linejoin='%s'/></svg>`
+	svgDaemonSet := `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M7 7h8v2H9v4H7V7zm10 10h-8v-2h6v-4h2v6zM5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z' fill='%s' stroke='%s' stroke-width='%s' stroke-linejoin='%s'/></svg>` // Original custom
+	svgContentCopy := `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z' fill='%s' stroke='%s' stroke-width='%s' stroke-linejoin='%s'/></svg>`
+	svgNavigateNext := `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z' fill='%s' stroke='%s' stroke-width='%s' stroke-linejoin='%s'/></svg>`
+	svgHistory := `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M13 3c-4.97 0-9 4.03-9 9H1l3.89 3.89.07.14L9 12H6c0-3.87 3.13-7 7-7s7 3.13 7 7-3.13 7-7 7c-1.93 0-3.68-.79-4.94-2.06l-1.42 1.42C8.27 19.99 10.51 21 13 21c4.97 0 9-4.03 9-9s-4.03-9-9-9zm-1 5v5l4.25 2.52.77-1.28-3.52-2.09V8H12z' fill='%s' stroke='%s' stroke-width='%s' stroke-linejoin='%s'/></svg>`
+
+	// Network Icons
+	svgService := `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M18 11c0-3.87-3.13-7-7-7S4 7.13 4 11h2c0-2.76 2.24-5 5-5s5 2.24 5 5h2zm-7 3c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3zm0 4c-.55 0-1-.45-1-1s.45-1 1-1 1 .45 1 1-.45 1-1 1zm-4 1h8v-2H7v2z' fill='%s' stroke='%s' stroke-width='%s' stroke-linejoin='%s'/></svg>` // Original custom
+	svgIngress := `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M11 7L9.6 8.4 12.2 11H4v2h8.2l-2.6 2.6L11 17l5-5-5-5zm9 12h-8v-2h8v2zM5 3h14a2 2 0 0 1 2 2v4h-2V5H5v14h14v-4h2v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z' fill='%s' stroke='%s' stroke-width='%s' stroke-linejoin='%s'/></svg>`                                     // Original custom
+
+	// Storage Icons
+	svgDownload := `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z' fill='%s' stroke='%s' stroke-width='%s' stroke-linejoin='%s'/></svg>`
+
+	// Configuration Icons
+	svgArticle := `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z' fill='%s' stroke='%s' stroke-width='%s' stroke-linejoin='%s'/></svg>`
+	svgVisibilityOff := `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M12 7c2.76 0 5 2.24 5 5 0 .65-.13 1.26-.36 1.83l2.92 2.92c1.51-1.26 2.7-2.89 3.43-4.75-1.73-4.39-6-7.5-11-7.5-1.4 0-2.74.25-3.98.7l2.16 2.16C10.74 7.13 11.35 7 12 7zM2 4.27l2.28 2.28.46.46C3.08 8.3 1.78 10.02 1 12c1.73 4.39 6 7.5 11 7.5 1.55 0 3.03-.3 4.38-.84l.42.42L19.73 22 21 20.73 3.27 3 2 4.27zM7.53 9.8l1.55 1.55c-.05.21-.08.43-.08.65 0 1.66 1.34 3 3 3 .22 0 .44-.03.65-.08l1.55 1.55c-.67.33-1.41.53-2.2.53-2.76 0-5-2.24-5-5 0-.79.2-1.53.53-2.2zm4.31-.78l3.15 3.15.02-.16c0-1.66-1.34-3-3-3l-.17.01z' fill='%s' stroke='%s' stroke-width='%s' stroke-linejoin='%s'/></svg>`
+
+	// Access Control Icons
+	svgAccountCircle := `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 3c1.66 0 3 1.34 3 3s-1.34 3-3 3-3-1.34-3-3 1.34-3 3-3zm0 14.2c-2.5 0-4.71-1.28-6-3.22.03-1.99 4-3.08 6-3.08 1.99 0 5.97 1.09 6 3.08-1.29 1.94-3.5 3.22-6 3.22z' fill='%s' stroke='%s' stroke-width='%s' stroke-linejoin='%s'/></svg>`
+	svgCheckCircle := `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z' fill='%s' stroke='%s' stroke-width='%s' stroke-linejoin='%s'/></svg>`
+	svgClusterRole := `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z' fill='%s' stroke='%s' stroke-width='%s' stroke-linejoin='%s'/></svg>` // Original custom
+
+	// Branch Icons
+	svgHome := `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z' fill='%s' stroke='%s' stroke-width='%s' stroke-linejoin='%s'/></svg>`
+	svgList := `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M3 13h2v-2H3v2zm0 4h2v-2H3v2zm0-8h2V7H3v2zm4 4h14v-2H7v2zm0 4h14v-2H7v2zM7 7v2h14V7H7z' fill='%s' stroke='%s' stroke-width='%s' stroke-linejoin='%s'/></svg>`
+	svgInfo := `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z' fill='%s' stroke='%s' stroke-width='%s' stroke-linejoin='%s'/></svg>`
+	// svgStorage duplicate defined above
+	// svgArticle duplicate defined above
+	// svgAccountCircle duplicate defined above
+
+	// Default Icons
+	svgHelpOutline := `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M11 18h2v-2h-2v2zm1-16C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm0-14c-2.21 0-4 1.79-4 4h2c0-1.1.9-2 2-2s2 .9 2 2c0 2-3 1.75-3 5h2c0-2.25 3-2.5 3-5 0-2.21-1.79-4-4-4z' fill='%s' stroke='%s' stroke-width='%s' stroke-linejoin='%s'/></svg>`
+	svgFolder := `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z' fill='%s' stroke='%s' stroke-width='%s' stroke-linejoin='%s'/></svg>`
+
+	// --- Призначення іконок ---
+	resourceIcons = map[string]fyne.Resource{
+		// Cluster
+		"Namespaces":       createStrokedIcon(svgFolderOpen), // theme.FolderOpenIcon()
+		"Nodes":            createStrokedIcon(svgComputer),   // theme.ComputerIcon()
+		"System Workloads": createStrokedIcon(svgSettings),   // theme.SettingsIcon()
+
+		// Workloads
+		"Pods":         createStrokedIcon(svgCropSquare),   // theme.CheckButtonIcon() -> Спрощено
+		"Deployments":  createStrokedIcon(svgReplay),       // theme.MediaReplayIcon()
+		"StatefulSets": createStrokedIcon(svgStorage),      // theme.StorageIcon()
+		"DaemonSets":   createStrokedIcon(svgDaemonSet),    // Оригінальний SVG
+		"ReplicaSets":  createStrokedIcon(svgContentCopy),  // theme.ContentCopyIcon()
+		"Jobs":         createStrokedIcon(svgNavigateNext), // theme.NavigateNextIcon()
+		"CronJobs":     createStrokedIcon(svgHistory),      // theme.HistoryIcon()
+
+		// Network
+		"Services":  createStrokedIcon(svgService), // Оригінальний SVG
+		"Ingresses": createStrokedIcon(svgIngress), // Оригінальний SVG
+
+		// Storage
+		"PersistentVolumes":      createStrokedIcon(svgStorage),  // theme.StorageIcon()
+		"PersistentVolumeClaims": createStrokedIcon(svgDownload), // theme.DownloadIcon()
+		"StorageClasses":         createStrokedIcon(svgSettings), // theme.SettingsIcon()
+
+		// Configuration
+		"ConfigMaps": createStrokedIcon(svgArticle),       // theme.FileTextIcon()
+		"Secrets":    createStrokedIcon(svgVisibilityOff), // theme.VisibilityOffIcon()
+
+		// Access Control
+		"ServiceAccounts":     createStrokedIcon(svgAccountCircle), // theme.AccountIcon()
+		"Roles":               createStrokedIcon(svgAccountCircle), // theme.AccountIcon()
+		"RoleBindings":        createStrokedIcon(svgCheckCircle),   // theme.ConfirmIcon() -> Замінено
+		"ClusterRoles":        createStrokedIcon(svgClusterRole),   // Оригінальний SVG
+		"ClusterRoleBindings": createStrokedIcon(svgCheckCircle),   // theme.ConfirmIcon() -> Замінено
+
+		// Branches
+		"Cluster":        createStrokedIcon(svgHome),          // theme.HomeIcon()
+		"Workloads":      createStrokedIcon(svgList),          // theme.ListIcon()
+		"Network":        createStrokedIcon(svgInfo),          // theme.InfoIcon()
+		"Storage":        createStrokedIcon(svgStorage),       // theme.StorageIcon()
+		"Configuration":  createStrokedIcon(svgArticle),       // theme.FileTextIcon()
+		"Access Control": createStrokedIcon(svgAccountCircle), // theme.AccountIcon()
+
+		// Defaults
+		"default":        createStrokedIcon(svgHelpOutline), // theme.QuestionIcon()
+		"branch_default": createStrokedIcon(svgFolder),      // theme.FolderIcon()
+	}
+}
 
 // Мапи для дерева ресурсів
 type resourceTreeNodeID = string
@@ -2992,6 +3115,16 @@ func buildContextMenu() *fyne.Menu {
 		fyneApp.Quit()
 	})
 
+	lightThemeItem := fyne.NewMenuItem("Світла Тема", func() {
+		logDebug("Встановлення світлої теми")
+		fyne.CurrentApp().Settings().SetTheme(theme.LightTheme())
+	})
+	darkThemeItem := fyne.NewMenuItem("Темна Тема", func() {
+		logDebug("Встановлення темної теми")
+		fyne.CurrentApp().Settings().SetTheme(theme.DarkTheme())
+	})
+	themeSeparator := fyne.NewMenuItemSeparator()
+
 	contextItems := []*fyne.MenuItem{}
 	allContexts, err := getContexts()
 	if err != nil {
@@ -3035,6 +3168,7 @@ func buildContextMenu() *fyne.Menu {
 	}
 	menu := fyne.NewMenu("Дії", contextItems...)
 	menu.Items = append(menu.Items, fyne.NewMenuItemSeparator(), refreshItem, openFolderItem)
+	menu.Items = append(menu.Items, themeSeparator, lightThemeItem, darkThemeItem)
 	menu.Items = append(menu.Items, fyne.NewMenuItemSeparator(), quitItem)
 	return menu
 }
@@ -3504,20 +3638,37 @@ func main() {
 			return container.NewHBox(widget.NewIcon(icon), widget.NewLabel("Template Node"))
 		},
 		func(id widget.TreeNodeID, branch bool, node fyne.CanvasObject) {
+			hbox, ok := node.(*fyne.Container)
+			if !ok || len(hbox.Objects) != 2 {
+				logError("UpdateNode: Неправильний тип шаблону вузла або кількість об'єктів")
+				return
+			}
+			iconWidget, okIcon := hbox.Objects[0].(*widget.Icon)
+			labelWidget, okLabel := hbox.Objects[1].(*widget.Label)
+			if !okIcon || !okLabel {
+				logError("UpdateNode: Не вдалося перетворити об'єкти на Icon/Label")
+				return
+			}
+
+			// Встановлюємо текст мітки
 			parts := strings.Split(id, "/")
 			displayName := parts[len(parts)-1]
-			if cont, ok := node.(*fyne.Container); ok && len(cont.Objects) == 2 {
-				if lbl, ok2 := cont.Objects[1].(*widget.Label); ok2 {
-					lbl.SetText(displayName)
-				}
-				if icon, ok2 := cont.Objects[0].(*widget.Icon); ok2 {
-					if branch {
-						icon.SetResource(theme.FolderIcon())
-					} else {
-						icon.SetResource(theme.FileTextIcon())
-					}
+			if displayName == "" {
+				displayName = "Cluster Root"
+			} // Для кореневого елемента
+			labelWidget.SetText(displayName)
+
+			// Встановлюємо іконку
+			iconRes, found := resourceIcons[id]
+			if !found {
+				// Якщо специфічної іконки немає, використовуємо дефолтну для гілки/листка
+				if branch {
+					iconRes = resourceIcons["branch_default"] // theme.FolderIcon()
+				} else {
+					iconRes = resourceIcons["default"] // theme.FileTextIcon() or QuestionIcon
 				}
 			}
+			iconWidget.SetResource(iconRes) // Встановлюємо знайдену або дефолтну іконку
 		},
 	)
 	resourceTypeTree.OnSelected = func(id widget.TreeNodeID) {
@@ -3689,7 +3840,7 @@ func main() {
 		} else if id.Row >= 0 && id.Col == -1 {
 			// --- Колонка номерів рядків (Row >= 0, Col == -1) ---
 			label.Alignment = fyne.TextAlignCenter
-			label.SetText(fmt.Sprintf("%d", id.Row))
+			label.SetText(fmt.Sprintf("%d", id.Row+1))
 
 		} else if id.Row == -1 && id.Col >= 0 {
 			// --- Рядок назв колонок (Row == -1, Col >= 0) ---
