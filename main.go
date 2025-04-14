@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"embed"
 	"errors"
@@ -21,6 +22,7 @@ import (
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
 	"fyne.io/fyne/v2/container"
+	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/driver/desktop"
 	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
@@ -1977,9 +1979,91 @@ func buildNodeDetailsView(node corev1.Node) fyne.CanvasObject {
 	backButton := widget.NewButton(labelBackToList, func() { displayResourceTableView() })
 	return container.NewBorder(backButton, nil, nil, nil, container.NewVScroll(detailsVBox))
 }
+
 func buildPodDetailsView(pod corev1.Pod) fyne.CanvasObject {
 	logDebug("Створення деталей для Pod: %s/%s", pod.Namespace, pod.Name)
-	detailsVBox := container.NewVBox()
+	detailsVBox := container.NewVBox() // Основний контейнер для деталей
+
+	// --- Кнопки дій ---
+	actionsBox := container.NewHBox()
+	logsButton := widget.NewButtonWithIcon("View Logs", theme.ListIcon(), func() {
+		// Обробник натискання кнопки логів
+		logInfo("Запит логів для Pod: %s/%s", pod.Namespace, pod.Name)
+
+		numContainers := len(pod.Spec.Containers)
+		if numContainers == 0 {
+			logWarning("У пода %s/%s немає контейнерів.", pod.Namespace, pod.Name)
+			// Використовуємо queueUIUpdate для показу діалогу з горутини/обробника
+			queueUIUpdate(func() {
+				dialog.ShowInformation("Інформація", "У вибраного пода немає контейнерів.", mainWindow)
+			})
+			return
+		}
+
+		// Якщо один контейнер, відкриваємо вікно логів одразу
+		if numContainers == 1 {
+			containerName := pod.Spec.Containers[0].Name
+			logDebug("Один контейнер знайдено: %s. Відкриття вікна логів.", containerName)
+			// Не потрібно queueUIUpdate, бо showLogWindow сама керує UI
+			showLogWindow(pod.Namespace, pod.Name, containerName)
+			return
+		}
+
+		// --- Використання ShowCustomConfirm для вибору контейнера ---
+		logDebug("Знайдено %d контейнерів. Створення діалогу вибору через ShowCustomConfirm.", numContainers)
+		var containerNames []string
+		for _, c := range pod.Spec.Containers {
+			containerNames = append(containerNames, c.Name)
+		}
+
+		// Змінна для зберігання вибраного контейнера
+		var selectedContainer string
+		// Встановлюємо перший контейнер як вибраний за замовчуванням
+		if len(containerNames) > 0 {
+			selectedContainer = containerNames[0]
+		}
+
+		// Створюємо RadioGroup для вибору
+		radioGroup := widget.NewRadioGroup(containerNames, func(selected string) {
+			logDebug("RadioGroup OnChanged: %s", selected)
+			selectedContainer = selected // Оновлюємо змінну при зміні вибору
+		})
+		radioGroup.SetSelected(selectedContainer) // Встановлюємо вибір за замовчуванням
+
+		// Створюємо та показуємо кастомний діалог (використовуємо queueUIUpdate для показу діалогу з обробника)
+		queueUIUpdate(func() {
+			confirmDialog := dialog.NewCustomConfirm(
+				"Виберіть контейнер",             // Title
+				"Вибрати",                        // Confirm button text
+				"Скасувати",                      // Dismiss button text
+				container.NewVScroll(radioGroup), // Content (RadioGroup у скролі)
+				func(confirm bool) { // Callback function
+					if confirm {
+						// Користувач натиснув "Вибрати"
+						if selectedContainer != "" {
+							logDebug("Підтверджено вибір контейнера: %s. Відкриття вікна логів.", selectedContainer)
+							// Не потрібно queueUIUpdate, бо showLogWindow сама керує UI
+							showLogWindow(pod.Namespace, pod.Name, selectedContainer)
+						} else {
+							logWarning("Підтверджено вибір, але selectedContainer порожній.")
+						}
+					} else {
+						// Користувач натиснув "Скасувати"
+						logDebug("Вибір контейнера скасовано.")
+					}
+				},
+				mainWindow, // Parent window
+			)
+			// Встановлюємо мінімальний розмір діалогу (опціонально)
+			confirmDialog.Resize(fyne.NewSize(300, 200))
+			confirmDialog.Show()
+		})
+		// --- Кінець використання ShowCustomConfirm ---
+	})
+	actionsBox.Add(logsButton) // Додаємо кнопку до HBox
+	// Можна додати інші кнопки дій тут (наприклад, Exec, Delete)
+
+	// --- Додаємо інформацію про под ---
 	detailsVBox.Add(createDetailRow("Name", pod.Name))
 	detailsVBox.Add(createDetailRow("Namespace", pod.Namespace))
 	detailsVBox.Add(createDetailRow("Created", pod.CreationTimestamp.Format(time.RFC1123)))
@@ -2010,9 +2094,307 @@ func buildPodDetailsView(pod corev1.Pod) fyne.CanvasObject {
 		containerBox.Add(widget.NewLabel("  <none>"))
 	}
 	detailsVBox.Add(containerBox)
+	// --- Кінець інформації про под ---
+
+	// Кнопка "Назад"
 	backButton := widget.NewButton(labelBackToList, func() { displayResourceTableView() })
-	return container.NewBorder(backButton, nil, nil, nil, container.NewVScroll(detailsVBox))
+
+	// Компонуємо вигляд: Кнопки дій зверху, кнопка Назад знизу, деталі в центрі
+	return container.NewBorder(
+		container.NewVBox(actionsBox, widget.NewSeparator()), // Top: Actions box and separator
+		backButton,                        // Bottom: Back button
+		nil,                               // Left
+		nil,                               // Right
+		container.NewVScroll(detailsVBox), // Center: Scrollable details
+	)
 }
+
+// Створює та показує нове вікно для відображення логів контейнера
+func showLogWindow(namespace, podName, containerName string) {
+	logWindow := fyneApp.NewWindow(fmt.Sprintf("Logs - %s/%s (%s)", namespace, podName, containerName))
+	logWindow.Resize(fyne.NewSize(800, 600))
+
+	// Створюємо багаторядкове текстове поле для логів (тільки для читання)
+	logEntry := widget.NewMultiLineEntry()
+	logEntry.Disable()                   // Робимо його нередагованим
+	logEntry.Wrapping = fyne.TextWrapOff // Вимикаємо перенос рядків для логів
+
+	// Створюємо скрол для текстового поля
+	logScroll := container.NewScroll(logEntry)
+
+	// Чекбокс для ввімкнення/вимкнення стрімінгу (слідування за логами)
+	followCheck := widget.NewCheck("Follow", nil)
+	followCheck.SetChecked(true) // За замовчуванням слідуємо
+
+	// Контекст для керування горутиною стрімінгу
+	// Він буде скасований при закритті вікна
+	ctx, cancelFunc := context.WithCancel(context.Background())
+
+	// Запускаємо горутину для отримання та відображення логів
+	// Передаємо контекст, дані пода, віджети та функцію скасування
+	go streamLogs(ctx, namespace, podName, containerName, logEntry, followCheck, logScroll)
+
+	// Встановлюємо обробник закриття вікна, який скасує контекст
+	logWindow.SetOnClosed(func() {
+		logInfo("Вікно логів для %s/%s (%s) закривається. Зупинка стрімінгу.", namespace, podName, containerName)
+		cancelFunc() // Скасовуємо контекст, що зупинить горутину streamLogs
+	})
+
+	// --- Компонування вікна логів ---
+	topToolbar := container.NewHBox(
+		widget.NewLabel(fmt.Sprintf("%s/%s [%s]", namespace, podName, containerName)),
+		// Можна додати інші елементи керування тут (наприклад, вибір кількості рядків)
+		followCheck,
+	)
+
+	logWindowContent := container.NewBorder(
+		topToolbar, // Top: інформація та чекбокс
+		nil,        // Bottom
+		nil,        // Left
+		nil,        // Right
+		logScroll,  // Center: скрольоване поле з логами
+	)
+
+	logWindow.SetContent(logWindowContent)
+	logWindow.Show()
+}
+
+// Отримує та стрімить логи для вказаного контейнера пода з батчингом (спрощена версія без окремої горутини відправки)
+func streamLogs(ctx context.Context, namespace, podName, containerName string,
+	entry *widget.Entry, followCheck *widget.Check, scroll *container.Scroll) {
+
+	logDebug("streamLogs: Starting for %s/%s [%s]", namespace, podName, containerName)
+	// Лог при виході з функції для діагностики
+	defer logDebug("streamLogs: Exiting for %s/%s [%s]", namespace, podName, containerName)
+
+	stateMu.RLock()
+	clientset := currentClientset
+	stateMu.RUnlock()
+
+	if clientset == nil {
+		logError("streamLogs: Немає активного clientset.")
+		queueUIUpdate(func() { entry.SetText("Помилка: Немає підключення до кластера.") })
+		return
+	}
+
+	// --- Змінні для батчингу ---
+	var logBuffer strings.Builder
+	var bufferMutex sync.Mutex // М'ютекс все ще потрібен, якщо доступ до буфера можливий з UI (хоча тут наче ні)
+	bufferSize := 0
+	maxBufferSize := 50 // Батч по 50 рядків
+
+	// --- Функція для відправки буфера в UI ---
+	// Викликається напряму з основного потоку горутини streamLogs
+	flushBuffer := func() {
+		bufferMutex.Lock()
+		if bufferSize == 0 {
+			bufferMutex.Unlock()
+			return
+		}
+		logsToSend := logBuffer.String()
+		logBuffer.Reset()
+		//currentSize := bufferSize
+		bufferSize = 0
+		bufferMutex.Unlock()
+
+		queueUIUpdate(func() { // Використовуємо fyne.Do
+			// logDebug("Flushing %d log lines to UI", currentSize) // Можна закоментувати для чистоти логів
+			prefix := ""
+			if entry.Text != "" && !strings.HasSuffix(entry.Text, "\n") && len(logsToSend) > 0 {
+				prefix = "\n"
+			}
+			entry.Append(prefix + logsToSend)
+			if followCheck.Checked && scroll != nil {
+				scroll.ScrollToBottom()
+			}
+		})
+	}
+	// --- Кінець flushBuffer ---
+
+	// --- Функція для додавання рядка в буфер і перевірки на заповнення ---
+	addLineToBuffer := func(line string) {
+		bufferMutex.Lock()
+		logBuffer.WriteString(line + "\n")
+		bufferSize++
+		shouldFlushNow := bufferSize >= maxBufferSize
+		bufferMutex.Unlock()
+
+		if shouldFlushNow {
+			// logDebug("Log buffer full (%d lines), flushing.", maxBufferSize)
+			flushBuffer() // Відправляємо одразу
+		}
+	}
+	// --- Кінець addLineToBuffer ---
+
+	// Гарантована відправка залишків буфера при виході з функції streamLogs
+	// Важливо: defer виконується останнім, після всіх return
+	defer func() {
+		logDebug("streamLogs: Flushing remaining buffer on exit for %s/%s [%s]", namespace, podName, containerName)
+		flushBuffer()
+	}()
+
+	// --- Початкове завантаження ---
+	var tailLines int64 = 100
+	opts := &corev1.PodLogOptions{Container: containerName, TailLines: &tailLines, Timestamps: true}
+	logDebug("Завантаження початкових %d рядків...", tailLines)
+	req := clientset.CoreV1().Pods(namespace).GetLogs(podName, opts)
+	stream, err := req.Stream(ctx) // Використовуємо контекст вікна
+	if err != nil {
+		logError("Помилка отримання початкового stream: %v", err)
+		queueUIUpdate(func() { entry.SetText(fmt.Sprintf("Помилка отримання логів:\n%v", err)) })
+		return // defer flushBuffer() спрацює
+	}
+
+	scanner := bufio.NewScanner(stream)
+	initialLineCount := 0
+	for scanner.Scan() {
+		// Перевіряємо контекст ПЕРЕД обробкою рядка
+		select {
+		case <-ctx.Done():
+			logInfo("Скасовано під час читання початкових логів.")
+			stream.Close() // Закриваємо потік
+			return         // defer flushBuffer() спрацює
+		default:
+			addLineToBuffer(scanner.Text())
+			initialLineCount++
+		}
+	}
+	stream.Close() // Закриваємо потік після читання
+	logDebug("Прочитано %d початкових рядків.", initialLineCount)
+	if errScan := scanner.Err(); errScan != nil {
+		// Перевіряємо чи помилка не через скасування контексту
+		if !errors.Is(errScan, context.Canceled) && ctx.Err() != context.Canceled {
+			logError("Помилка сканера (початкові логи): %v", errScan)
+			addLineToBuffer(fmt.Sprintf("\nПОМИЛКА ЧИТАННЯ ПОЧАТКОВИХ ЛОГІВ: %v\n", errScan))
+		} else {
+			logInfo("Сканер початкових логів завершився через скасування контексту.")
+			return // defer flushBuffer() спрацює
+		}
+	}
+	// Не потрібно примусової відправки тут, defer відправить або наступний етап
+
+	// --- Стрімінг (Follow=true) ---
+	for { // Зовнішній цикл для перепідключення
+		// Перевірка контексту на початку кожної спроби перепідключення
+		select {
+		case <-ctx.Done():
+			logInfo("Стрімінг зупинено перед циклом перепідключення (контекст скасовано).")
+			return
+		default:
+		}
+
+		// Перевіряємо Follow чекбокс
+		if !followCheck.Checked {
+			logDebug("Follow вимкнено, завершення streamLogs.")
+			return // Якщо слідування вимкнене, завершуємо горутину
+		}
+
+		logDebug("Запуск/перезапуск стрімінгу (Follow=true)...")
+		streamOpts := &corev1.PodLogOptions{Container: containerName, Follow: true, Timestamps: true, SinceTime: &metav1.Time{Time: time.Now()}} // Додано SinceTime
+		reqFollow := clientset.CoreV1().Pods(namespace).GetLogs(podName, streamOpts)
+		streamFollow, errFollow := reqFollow.Stream(ctx) // Використовуємо контекст вікна
+
+		if errFollow != nil {
+			// Якщо контекст скасовано, це очікувана помилка при закритті вікна
+			if errors.Is(errFollow, context.Canceled) || ctx.Err() == context.Canceled {
+				logInfo("Не вдалося почати стрімінг, оскільки контекст скасовано.")
+				return // Виходимо
+			}
+			logError("Помилка отримання Follow stream: %v", errFollow)
+			addLineToBuffer(fmt.Sprintf("\nПОМИЛКА СТРІМІНГУ: %v\n", errFollow))
+			flushBuffer() // Відправляємо помилку одразу
+			// Пауза перед повторною спробою
+			select {
+			case <-time.After(5 * time.Second):
+				continue // Наступна ітерація циклу for
+			case <-ctx.Done():
+				logInfo("Стрімінг зупинено після помилки підключення під час паузи (контекст скасовано).")
+				return
+			}
+		}
+
+		// Читання потоку
+		scannerFollow := bufio.NewScanner(streamFollow)
+		streamLineCount := 0
+	ScanLoopFollow:
+		for scannerFollow.Scan() {
+			// Перевіряємо контекст ПЕРЕД обробкою рядка
+			select {
+			case <-ctx.Done():
+				logInfo("Стрімінг перервано під час читання (контекст скасовано).")
+				streamFollow.Close()
+				break ScanLoopFollow // Виходимо з внутрішнього циклу сканера
+			default:
+				// Follow перевіряємо ТУТ, щоб не пропустити вимкнення
+				if !followCheck.Checked {
+					logDebug("Follow вимкнено під час читання потоку.")
+					streamFollow.Close()
+					break ScanLoopFollow
+				}
+				addLineToBuffer(scannerFollow.Text())
+				streamLineCount++
+			}
+		} // Кінець for scannerFollow.Scan()
+
+		streamFollow.Close() // Закриваємо потік після виходу з ScanLoopFollow
+		logDebug("Прочитано %d рядків у поточному сеансі стрімінгу.", streamLineCount)
+		// flushBuffer() // Не викликаємо тут, defer зробить це гарантовано при виході
+
+		// Перевірка контексту ПІСЛЯ виходу з внутрішнього циклу
+		select {
+		case <-ctx.Done():
+			logInfo("Стрімінг завершено (контекст скасовано після ScanLoopFollow).")
+			return // Остаточний вихід, defer flushBuffer() спрацює
+		default: // Якщо контекст ще не скасовано
+		}
+
+		// Перевірка помилок сканера після завершення ScanLoopFollow
+		if errScan := scannerFollow.Err(); errScan != nil {
+			if errors.Is(errScan, context.Canceled) {
+				logInfo("Сканер зупинено через скасування контексту (після ScanLoopFollow, errScan).")
+				return // Виходимо, defer спрацює
+			} else if strings.Contains(errScan.Error(), "net/http: request canceled") || errors.Is(errScan, context.DeadlineExceeded) {
+				logDebug("Потік логів завершився (таймаут/скасування сервером): %v", errScan)
+				// Не показуємо користувачу, просто перепідключимось
+			} else {
+				logError("Неочікувана помилка сканера: %v", errScan)
+				addLineToBuffer(fmt.Sprintf("\nПОМИЛКА ЧИТАННЯ ПОТОКУ: %v\n", errScan))
+				// flushBuffer() // Відправиться через defer або на наступній ітерації
+			}
+			// Пауза перед спробою перепідключення (якщо контекст ще активний)
+			if ctx.Err() == nil {
+				select {
+				case <-time.After(2 * time.Second):
+					logDebug("Пауза перед спробою перепідключення до стріму логів...")
+					// Цикл for продовжиться
+				case <-ctx.Done():
+					logInfo("Стрімінг зупинено після помилки сканера під час паузи (контекст скасовано).")
+					return // defer спрацює
+				}
+			} else {
+				return
+			} // Якщо контекст вже скасовано, виходимо
+		} else {
+			// Потік завершився без помилки сканера
+			// Якщо Follow все ще true і контекст активний, спробуємо перепідключитися
+			if followCheck.Checked && ctx.Err() == nil {
+				logWarning("Потік логів завершився без помилок сканера. Спроба перепідключення...")
+				select {
+				case <-time.After(2 * time.Second):
+					// Цикл for продовжиться
+				case <-ctx.Done():
+					logInfo("Стрімінг зупинено після нормального завершення потоку під час паузи (контекст скасовано).")
+					return // defer спрацює
+				}
+			} else {
+				// Якщо Follow вимкнено або контекст скасовано, завершуємо
+				logInfo("Стрімінг завершено (потік закрився без помилок, Follow=%v, ctx.Err=%v).", followCheck.Checked, ctx.Err())
+				return // defer спрацює
+			}
+		}
+	} // Кінець зовнішнього циклу for
+}
+
 func buildNamespaceDetailsView(ns corev1.Namespace) fyne.CanvasObject {
 	logDebug("Створення деталей для Namespace: %s", ns.Name)
 	detailsVBox := container.NewVBox()
@@ -2879,7 +3261,6 @@ func displayClusterOverview(serverVersion string) {
 
 }
 
-// --- Головна функція та запуск Fyne ---
 // --- Головна функція та запуск Fyne ---
 func main() {
 	log.SetFlags(log.Ldate | log.Ltime)
