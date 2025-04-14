@@ -125,124 +125,105 @@ var (
 )
 
 // Ініціалізація мапи іконок для типів ресурсів
-func init() {
+func createIcons() {
 	// --- Константи для стилю іконок з контуром ---
 	const iconFillColor = "#FFFFFF"   // Середньо-сірий для заливки
 	const iconStrokeColor = "#E26D00" // Білий для контуру
-	const iconStrokeWidth = "1.5"     // Товщина контуру
+	const iconStrokeWidth = "0.5"     // Товщина контуру
 	const strokeLineJoin = "round"    // Стиль з'єднання ліній
 	// -------------------------------------------
 
-	// Хелпер для створення ресурсу іконки зі стилем
-	createStrokedIcon := func(svgContent string) fyne.Resource {
-		// Додаємо атрибути до першого тегу path або іншого графічного елемента
-		// Це спрощений підхід; може не працювати для складних SVG з групами <g> без fill/stroke
-		// Краще додавати fill/stroke/stroke-width безпосередньо до path/circle/rect в SVG рядку.
-		// Оскільки ми використовуємо fmt.Sprintf, ми ВЖЕ додаємо їх в сам рядок SVG.
-		// Тому ця функція просто форматує рядок і створює ресурс.
+	// Хелпер для створення ресурсу іконки зі стилем та УНІКАЛЬНИМ іменем
+	// Тепер приймає 'resourceKey' для генерації імені
+	createStrokedIcon := func(resourceKey, svgContent string) fyne.Resource {
 		fullSvg := fmt.Sprintf(svgContent, iconFillColor, iconStrokeColor, iconStrokeWidth, strokeLineJoin)
-		// Ім'я ресурсу не є критичним тут, головне - унікальність для кешування, якщо потрібно
-		// Використаємо перші 10 символів SVG як частину імені
-		resourceName := "stroked_" + svgContent[:min(10, len(svgContent))] + ".svg"
+		// Генеруємо ім'я на основі ключа, замінюючи пробіли/спецсимволи
+		safeKey := strings.ToLower(resourceKey)
+		safeKey = strings.ReplaceAll(safeKey, " ", "_")
+		safeKey = strings.ReplaceAll(safeKey, "/", "_") // На випадок вкладених ID
+		resourceName := fmt.Sprintf("stroked_%s.svg", safeKey)
 		return fyne.NewStaticResource(resourceName, []byte(fullSvg))
 	}
 
-	// --- Визначення SVG для всіх іконок (з використанням Material Icons де можливо) ---
-	// Важливо: viewBox="0 0 24 24" для стандартних Material Icons
-	// Атрибути fill='%s' stroke='%s' stroke-width='%s' stroke-linejoin='%s' будуть додані через fmt.Sprintf
-
-	// Cluster Icons
-	svgFolderOpen := `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M20 6h-8l-2-2H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2zm0 12H4V8h16v10z' fill='%s' stroke='%s' stroke-width='%s' stroke-linejoin='%s'/></svg>`
+	// --- Визначення SVG для всіх іконок (здебільшого Material Symbols) ---
+	// SVG рядки залишаються такими ж, як у попередній відповіді (Версія 2)
+	svgInventory2 := `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M20 2H4c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zM12 6h8v4h-8V6zm0 6h8v4h-8v-4zM4 18V4h6v14H4z' fill='%s' stroke='%s' stroke-width='%s' stroke-linejoin='%s'/></svg>`
 	svgComputer := `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M20 18c1.1 0 1.99-.9 1.99-2L22 6c0-1.1-.9-2-2-2H4c-1.1 0-2 .9-2 2v10c0 1.1.9 2 2 2H0v2h24v-2h-4zM4 6h16v10H4V6z' fill='%s' stroke='%s' stroke-width='%s' stroke-linejoin='%s'/></svg>`
-	svgSettings := `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M19.43 12.98c.04-.32.07-.64.07-.98s-.03-.66-.07-.98l2.11-1.65c.19-.15.24-.42.12-.64l-2-3.46c-.12-.22-.39-.3-.61-.22l-2.49 1c-.52-.4-1.08-.73-1.69-.98l-.38-2.65C14.46 2.18 14.25 2 14 2h-4c-.25 0-.46.18-.49.42l-.38 2.65c-.61.25-1.17.59-1.69.98l-2.49-1c-.23-.08-.49 0-.61.22l-2 3.46c-.13.22-.07.49.12.64l2.11 1.65c-.04.32-.07.65-.07.98s.03.66.07.98l-2.11 1.65c-.19.15-.24.42-.12.64l2 3.46c.12.22.39.3.61.22l2.49-1c.52.4 1.08.73 1.69.98l.38 2.65c.03.24.24.42.49.42h4c.25 0 .46-.18.49-.42l.38-2.65c.61-.25 1.17-.59 1.69-.98l2.49 1c.23.08.49 0 .61-.22l2-3.46c.12-.22.07-.49-.12-.64l-2.11-1.65zM12 15.5c-1.93 0-3.5-1.57-3.5-3.5s1.57-3.5 3.5-3.5 3.5 1.57 3.5 3.5-1.57 3.5-3.5 3.5z' fill='%s' stroke='%s' stroke-width='%s' stroke-linejoin='%s'/></svg>`
-
-	// Workload Icons
-	// svgCheckBoxOutlineBlank := `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M19 5v14H5V5h14m0-2H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2z' fill='%s' stroke='%s' stroke-width='%s' stroke-linejoin='%s'/></svg>`
-	// Використаємо простіший квадрат як іконку для Pods
-	svgCropSquare := `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M18 4H6c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V6c0-1.1-.9-2-2-2zm0 14H6V6h12v12z' fill='%s' stroke='%s' stroke-width='%s' stroke-linejoin='%s'/></svg>`
-	svgReplay := `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M12 5V1L7 6l5 5V7c3.31 0 6 2.69 6 6s-2.69 6-6 6-6-2.69-6-6H4c0 4.42 3.58 8 8 8s8-3.58 8-8-3.58-8-8-8z' fill='%s' stroke='%s' stroke-width='%s' stroke-linejoin='%s'/></svg>`
-	svgStorage := `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M2 20h20v-4H2v4zm2-3h2v2H4v-2zM2 4v4h20V4H2zm4 3H4V5h2v2zm-4 7h20v-4H2v4zm2-3h2v2H4v-2z' fill='%s' stroke='%s' stroke-width='%s' stroke-linejoin='%s'/></svg>`
-	svgDaemonSet := `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M7 7h8v2H9v4H7V7zm10 10h-8v-2h6v-4h2v6zM5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z' fill='%s' stroke='%s' stroke-width='%s' stroke-linejoin='%s'/></svg>` // Original custom
+	svgTune := `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M3 17v2h6v-2H3zM3 5v2h10V5H3zm10 16v-2h8V17h-8zM7 9v2H3v2h4v2h2V9H7zm14 4v-2H11v2h10zm-6-4h2V7h4V5h-4V3h-2v6z' fill='%s' stroke='%s' stroke-width='%s' stroke-linejoin='%s'/></svg>`
+	svgWidgets := `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M13 13v8h8v-8h-8zM3 21h8v-8H3v8zM3 3v8h8V3H3zm13.66-1.31L11 7.34 16.66 13l5.66-5.66-5.66-5.65z' fill='%s' stroke='%s' stroke-width='%s' stroke-linejoin='%s'/></svg>`
+	svgAutorenew := `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M12 6v3l4-4-4-4v3c-4.42 0-8 3.58-8 8 0 1.57.46 3.03 1.24 4.26L6.7 14.8c-.45-.83-.7-1.79-.7-2.8 0-3.31 2.69-6 6-6zm6.76 1.74L17.3 9.2c.44.84.7 1.79.7 2.8 0 3.31-2.69 6-6 6v-3l-4 4 4 4v-3c4.42 0 8-3.58 8-8 0-1.57-.46-3.03-1.24-4.26z' fill='%s' stroke='%s' stroke-width='%s' stroke-linejoin='%s'/></svg>`
+	svgFingerprint := `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm-5.5-2.86c.16-.13.3-.28.43-.44.48-.61.83-1.31.97-2.09.1-.5.13-.98.1-1.44-.02-.3-.04-.56-.04-.77 0-.28.02-.51.04-.67.08-.6.3-1.14.61-1.62.2-.3.45-.55.74-.76.57-.41 1.26-.64 1.99-.64s1.42.23 1.99.64c.29.21.54.46.74.76.31.48.53 1.02.61 1.62.02.16.04.39.04.67 0 .21-.01.47-.04.77-.03.46 0 .94.1 1.44.14.78.49 1.48.97 2.09.13.16.27.31.43.44.77.61 1.2 1.51 1.2 2.54 0 1.1-.46 2.08-1.21 2.83-.76.76-1.76 1.21-2.83 1.21s-2.07-.45-2.83-1.21C9.96 18.94 9.5 17.96 9.5 16.86c0-1.03.43-1.93 1.2-2.54zM12 17c.83 0 1.5.67 1.5 1.5s-.67 1.5-1.5 1.5-1.5-.67-1.5-1.5.67-1.5 1.5 1.5zm0-10c.83 0 1.5.67 1.5 1.5s-.67 1.5-1.5 1.5S10.5 9.33 10.5 8.5 11.17 7 12 7zm0 3c.83 0 1.5.67 1.5 1.5s-.67 1.5-1.5 1.5-1.5-.67-1.5-1.5.67-1.5 1.5 1.5zm0 3c.83 0 1.5.67 1.5 1.5s-.67 1.5-1.5 1.5-1.5-.67-1.5-1.5.67-1.5 1.5 1.5z' fill='%s' stroke='%s' stroke-width='%s' stroke-linejoin='%s'/></svg>`
+	svgSettingsInputComponent := `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M5 2c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2v4h-2V4H7v2H5V2zm14 6v4h2V8c0-1.1-.9-2-2-2h-2v2h2v2zm-4 0v14H9V8h10zm-8 2H5v6h2v-2h2v-2H7v-2zm4 0v10h6V10h-6zm2 2h2v6h-2v-6zm4 10v2h2v-2h2v-2h-2v-2h-2v4z' fill='%s' stroke='%s' stroke-width='%s' stroke-linejoin='%s'/></svg>`
 	svgContentCopy := `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z' fill='%s' stroke='%s' stroke-width='%s' stroke-linejoin='%s'/></svg>`
-	svgNavigateNext := `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M10 6L8.59 7.41 13.17 12l-4.58 4.59L10 18l6-6z' fill='%s' stroke='%s' stroke-width='%s' stroke-linejoin='%s'/></svg>`
-	svgHistory := `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M13 3c-4.97 0-9 4.03-9 9H1l3.89 3.89.07.14L9 12H6c0-3.87 3.13-7 7-7s7 3.13 7 7-3.13 7-7 7c-1.93 0-3.68-.79-4.94-2.06l-1.42 1.42C8.27 19.99 10.51 21 13 21c4.97 0 9-4.03 9-9s-4.03-9-9-9zm-1 5v5l4.25 2.52.77-1.28-3.52-2.09V8H12z' fill='%s' stroke='%s' stroke-width='%s' stroke-linejoin='%s'/></svg>`
-
-	// Network Icons
-	svgService := `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M18 11c0-3.87-3.13-7-7-7S4 7.13 4 11h2c0-2.76 2.24-5 5-5s5 2.24 5 5h2zm-7 3c-1.66 0-3 1.34-3 3s1.34 3 3 3 3-1.34 3-3-1.34-3-3-3zm0 4c-.55 0-1-.45-1-1s.45-1 1-1 1 .45 1 1-.45 1-1 1zm-4 1h8v-2H7v2z' fill='%s' stroke='%s' stroke-width='%s' stroke-linejoin='%s'/></svg>` // Original custom
-	svgIngress := `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M11 7L9.6 8.4 12.2 11H4v2h8.2l-2.6 2.6L11 17l5-5-5-5zm9 12h-8v-2h8v2zM5 3h14a2 2 0 0 1 2 2v4h-2V5H5v14h14v-4h2v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z' fill='%s' stroke='%s' stroke-width='%s' stroke-linejoin='%s'/></svg>`                                     // Original custom
-
-	// Storage Icons
-	svgDownload := `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M19 9h-4V3H9v6H5l7 7 7-7zM5 18v2h14v-2H5z' fill='%s' stroke='%s' stroke-width='%s' stroke-linejoin='%s'/></svg>`
-
-	// Configuration Icons
+	svgPlayArrow := `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M8 5v14l11-7z' fill='%s' stroke='%s' stroke-width='%s' stroke-linejoin='%s'/></svg>`
+	svgSchedule := `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8z' fill='%s' stroke='%s' stroke-width='%s' stroke-linejoin='%s'/><path d='M12.5 7H11v6l5.25 3.15.75-1.23-4.5-2.67z' fill='%s' stroke='%s' stroke-width='%s' stroke-linejoin='%s'/></svg>`
+	svgHub := `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M17 16l-4-4V8.82C14.16 8.4 15 7.3 15 6c0-1.66-1.34-3-3-3S9 4.34 9 6c0 1.3.84 2.4 2 2.82V12l-4 4H3v5h5v-3.05l4-4.2 4 4.2V21h5v-5h-4z' fill='%s' stroke='%s' stroke-width='%s' stroke-linejoin='%s'/></svg>`
+	svgRoute := `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M19.77 7.23l.01-.01-3.18-3.18c-.8-.8-2.08-.8-2.89 0L3 14.72V21h6.28l10.48-10.48c.8-.8.8-2.09-.01-2.89zm-1.42 1.41L17.63 8l-.61.61-1.41-1.41.61-.61-1.06-1.06-.61.61-1.41-1.41.61-.61-1.06-1.06L10.28 5.5l8.08 8.08-1.41 1.41z' fill='%s' stroke='%s' stroke-width='%s' stroke-linejoin='%s'/></svg>`
+	svgStorage := `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M2 20h20v-4H2v4zm2-3h2v2H4v-2zM2 4v4h20V4H2zm4 3H4V5h2v2zm-4 7h20v-4H2v4zm2-3h2v2H4v-2z' fill='%s' stroke='%s' stroke-width='%s' stroke-linejoin='%s'/></svg>`
+	svgFileCopy := `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm-1 4l6 6v10c0 1.1-.9 2-2 2H7.99C6.89 23 6 22.1 6 21l.01-14c0-1.1.89-2 1.99-2h7zm-1 7h5.5L14 6.5V12z' fill='%s' stroke='%s' stroke-width='%s' stroke-linejoin='%s'/></svg>`
+	svgClass := `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M18 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zM6 4h5v8l-2.5-1.5L6 12V4z' fill='%s' stroke='%s' stroke-width='%s' stroke-linejoin='%s'/></svg>`
 	svgArticle := `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M19 3H5c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h14c1.1 0 2-.9 2-2V5c0-1.1-.9-2-2-2zm-5 14H7v-2h7v2zm3-4H7v-2h10v2zm0-4H7V7h10v2z' fill='%s' stroke='%s' stroke-width='%s' stroke-linejoin='%s'/></svg>`
-	svgVisibilityOff := `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M12 7c2.76 0 5 2.24 5 5 0 .65-.13 1.26-.36 1.83l2.92 2.92c1.51-1.26 2.7-2.89 3.43-4.75-1.73-4.39-6-7.5-11-7.5-1.4 0-2.74.25-3.98.7l2.16 2.16C10.74 7.13 11.35 7 12 7zM2 4.27l2.28 2.28.46.46C3.08 8.3 1.78 10.02 1 12c1.73 4.39 6 7.5 11 7.5 1.55 0 3.03-.3 4.38-.84l.42.42L19.73 22 21 20.73 3.27 3 2 4.27zM7.53 9.8l1.55 1.55c-.05.21-.08.43-.08.65 0 1.66 1.34 3 3 3 .22 0 .44-.03.65-.08l1.55 1.55c-.67.33-1.41.53-2.2.53-2.76 0-5-2.24-5-5 0-.79.2-1.53.53-2.2zm4.31-.78l3.15 3.15.02-.16c0-1.66-1.34-3-3-3l-.17.01z' fill='%s' stroke='%s' stroke-width='%s' stroke-linejoin='%s'/></svg>`
-
-	// Access Control Icons
+	svgKey := `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M21 10h-8.35C11.83 7.67 9.61 6 7 6c-3.31 0-6 2.69-6 6s2.69 6 6 6c2.61 0 4.83-1.67 5.65-4H21v4h2v-4h1v-2h-1v-4h1v-2h-1V4h-2v6zM7 15c-1.66 0-3-1.34-3-3s1.34-3 3-3 3 1.34 3 3-1.34 3-3 3z' fill='%s' stroke='%s' stroke-width='%s' stroke-linejoin='%s'/></svg>`
 	svgAccountCircle := `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 3c1.66 0 3 1.34 3 3s-1.34 3-3 3-3-1.34-3-3 1.34-3 3-3zm0 14.2c-2.5 0-4.71-1.28-6-3.22.03-1.99 4-3.08 6-3.08 1.99 0 5.97 1.09 6 3.08-1.29 1.94-3.5 3.22-6 3.22z' fill='%s' stroke='%s' stroke-width='%s' stroke-linejoin='%s'/></svg>`
-	svgCheckCircle := `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z' fill='%s' stroke='%s' stroke-width='%s' stroke-linejoin='%s'/></svg>`
-	svgClusterRole := `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M16 11c1.66 0 2.99-1.34 2.99-3S17.66 5 16 5c-1.66 0-3 1.34-3 3s1.34 3 3 3zm-8 0c1.66 0 2.99-1.34 2.99-3S9.66 5 8 5C6.34 5 5 6.34 5 8s1.34 3 3 3zm0 2c-2.33 0-7 1.17-7 3.5V19h14v-2.5c0-2.33-4.67-3.5-7-3.5zm8 0c-.29 0-.62.02-.97.05 1.16.84 1.97 1.97 1.97 3.45V19h6v-2.5c0-2.33-4.67-3.5-7-3.5z' fill='%s' stroke='%s' stroke-width='%s' stroke-linejoin='%s'/></svg>` // Original custom
-
-	// Branch Icons
+	svgBadge := `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M20 7h-5V4c0-1.1-.9-2-2-2h-2c-1.1 0-2 .9-2 2v3H4c-1.1 0-2 .9-2 2v11c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V9c0-1.1-.9-2-2-2zM12 12c-1.66 0-3-1.34-3-3s1.34-3 3-3 3 1.34 3 3-1.34 3-3 3zm0 8c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z' fill='%s' stroke='%s' stroke-width='%s' stroke-linejoin='%s'/></svg>`
+	svgLink := `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M3.9 12c0-1.71 1.39-3.1 3.1-3.1h4V7H7c-2.76 0-5 2.24-5 5s2.24 5 5 5h4v-1.9H7c-1.71 0-3.1-1.39-3.1-3.1zM8 13h8v-2H8v2zm9-6h-4v1.9h4c1.71 0 3.1 1.39 3.1 3.1s-1.39 3.1-3.1 3.1h-4V17h4c2.76 0 5-2.24 5-5s-2.24-5-5-5z' fill='%s' stroke='%s' stroke-width='%s' stroke-linejoin='%s'/></svg>`
+	svgPolicy := `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M21.65 11.65l-2.79-2.79c-.32-.32-.86-.1-.86.35V11H4c-.55 0-1 .45-1 1s.45 1 1 1h14v1.79c0 .45.54.67.85.35l2.79-2.79c.2-.19.2-.51.01-.7zM12 1C5.93 1 1 5.93 1 12s4.93 11 11 11 11-4.93 11-11S18.07 1 12 1zm0 20c-4.96 0-9-4.04-9-9s4.04-9 9-9 9 4.04 9 9-4.04 9-9 9z' fill='%s' stroke='%s' stroke-width='%s' stroke-linejoin='%s'/></svg>`
 	svgHome := `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z' fill='%s' stroke='%s' stroke-width='%s' stroke-linejoin='%s'/></svg>`
-	svgList := `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M3 13h2v-2H3v2zm0 4h2v-2H3v2zm0-8h2V7H3v2zm4 4h14v-2H7v2zm0 4h14v-2H7v2zM7 7v2h14V7H7z' fill='%s' stroke='%s' stroke-width='%s' stroke-linejoin='%s'/></svg>`
-	svgInfo := `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm1 15h-2v-6h2v6zm0-8h-2V7h2v2z' fill='%s' stroke='%s' stroke-width='%s' stroke-linejoin='%s'/></svg>`
-	// svgStorage duplicate defined above
-	// svgArticle duplicate defined above
-	// svgAccountCircle duplicate defined above
-
-	// Default Icons
+	svgWorkOutline := `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M14 6V4h-4v2h4zM4 8v11h16V8H4zm16-2c1.11 0 2 .89 2 2v11c0 1.11-.89 2-2 2H4c-1.11 0-2-.89-2-2l.01-11c0-1.11.88-2 1.99-2h4V4c0-1.11.89-2 2-2h4c1.11 0 2 .89 2 2v2h4z' fill='%s' stroke='%s' stroke-width='%s' stroke-linejoin='%s'/></svg>`
+	svgLan := `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M13 22h8v-7h-3v-4h-5V9h3V2H8v7h3v2H6v4H3v7h8v-7H8v-2h8v2h-3z' fill='%s' stroke='%s' stroke-width='%s' stroke-linejoin='%s'/></svg>`
+	svgAdminPanelSettings := `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M17.5 12a1.5 1.5 0 100-3 1.5 1.5 0 000 3zm-1 .5h-9c-1.1 0-2 .9-2 2v3h13v-3c0-1.1-.9-2-2-2zM19.43 7.98c.04-.32.07-.64.07-.98s-.03-.66-.07-.98l1.48-1.18c.16-.13.2-.36.09-.55l-1-1.73c-.11-.19-.34-.24-.54-.15l-1.74.69c-.36-.28-.76-.51-1.18-.69L14.46 2.3c-.05-.22-.24-.38-.46-.38h-4c-.22 0-.41.16-.46.38l-.33 1.85c-.43.18-.83.41-1.18.69l-1.74-.69c-.2-.09-.43-.04-.54.15l-1 1.73c-.11.19-.07.42.09.55l1.48 1.18c-.04.32-.07.65-.07.98s.03.66.07.98l-1.48 1.18c-.16.13-.2.36-.09.55l1 1.73c.11.19.34.24.54.15l1.74-.69c.36.28.76.51 1.18.69l.33 1.85c.05.22.24.38.46.38h4c.22 0 .41-.16.46.38l.33-1.85c.43-.18.83-.41 1.18-.69l1.74.69c.2.09.43.04.54.15l1-1.73c.11-.19.07-.42-.09-.55l-1.48-1.18zM12 11.5c-1.38 0-2.5-1.12-2.5-2.5S10.62 6.5 12 6.5s2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z' fill='%s' stroke='%s' stroke-width='%s' stroke-linejoin='%s'/></svg>`
 	svgHelpOutline := `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M11 18h2v-2h-2v2zm1-16C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm0 18c-4.41 0-8-3.59-8-8s3.59-8 8-8 8 3.59 8 8-3.59 8-8 8zm0-14c-2.21 0-4 1.79-4 4h2c0-1.1.9-2 2-2s2 .9 2 2c0 2-3 1.75-3 5h2c0-2.25 3-2.5 3-5 0-2.21-1.79-4-4-4z' fill='%s' stroke='%s' stroke-width='%s' stroke-linejoin='%s'/></svg>`
 	svgFolder := `<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'><path d='M10 4H4c-1.1 0-1.99.9-1.99 2L2 18c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2h-8l-2-2z' fill='%s' stroke='%s' stroke-width='%s' stroke-linejoin='%s'/></svg>`
 
-	// --- Призначення іконок ---
+	// --- Призначення іконок (Викликаємо createStrokedIcon з КЛЮЧЕМ та SVG) ---
 	resourceIcons = map[string]fyne.Resource{
 		// Cluster
-		"Namespaces":       createStrokedIcon(svgFolderOpen), // theme.FolderOpenIcon()
-		"Nodes":            createStrokedIcon(svgComputer),   // theme.ComputerIcon()
-		"System Workloads": createStrokedIcon(svgSettings),   // theme.SettingsIcon()
+		"Namespaces":       createStrokedIcon("Namespaces", svgInventory2),
+		"Nodes":            createStrokedIcon("Nodes", svgComputer),
+		"System Workloads": createStrokedIcon("System Workloads", svgTune),
 
 		// Workloads
-		"Pods":         createStrokedIcon(svgCropSquare),   // theme.CheckButtonIcon() -> Спрощено
-		"Deployments":  createStrokedIcon(svgReplay),       // theme.MediaReplayIcon()
-		"StatefulSets": createStrokedIcon(svgStorage),      // theme.StorageIcon()
-		"DaemonSets":   createStrokedIcon(svgDaemonSet),    // Оригінальний SVG
-		"ReplicaSets":  createStrokedIcon(svgContentCopy),  // theme.ContentCopyIcon()
-		"Jobs":         createStrokedIcon(svgNavigateNext), // theme.NavigateNextIcon()
-		"CronJobs":     createStrokedIcon(svgHistory),      // theme.HistoryIcon()
+		"Pods":         createStrokedIcon("Pods", svgWidgets),
+		"Deployments":  createStrokedIcon("Deployments", svgAutorenew),
+		"StatefulSets": createStrokedIcon("StatefulSets", svgFingerprint),          // Змінено
+		"DaemonSets":   createStrokedIcon("DaemonSets", svgSettingsInputComponent), // Змінено
+		"ReplicaSets":  createStrokedIcon("ReplicaSets", svgContentCopy),
+		"Jobs":         createStrokedIcon("Jobs", svgPlayArrow),
+		"CronJobs":     createStrokedIcon("CronJobs", svgSchedule),
 
 		// Network
-		"Services":  createStrokedIcon(svgService), // Оригінальний SVG
-		"Ingresses": createStrokedIcon(svgIngress), // Оригінальний SVG
+		"Services":  createStrokedIcon("Services", svgHub),
+		"Ingresses": createStrokedIcon("Ingresses", svgRoute),
 
 		// Storage
-		"PersistentVolumes":      createStrokedIcon(svgStorage),  // theme.StorageIcon()
-		"PersistentVolumeClaims": createStrokedIcon(svgDownload), // theme.DownloadIcon()
-		"StorageClasses":         createStrokedIcon(svgSettings), // theme.SettingsIcon()
+		"PersistentVolumes":      createStrokedIcon("PersistentVolumes", svgStorage),
+		"PersistentVolumeClaims": createStrokedIcon("PersistentVolumeClaims", svgFileCopy),
+		"StorageClasses":         createStrokedIcon("StorageClasses", svgClass),
 
 		// Configuration
-		"ConfigMaps": createStrokedIcon(svgArticle),       // theme.FileTextIcon()
-		"Secrets":    createStrokedIcon(svgVisibilityOff), // theme.VisibilityOffIcon()
+		"ConfigMaps": createStrokedIcon("ConfigMaps", svgArticle),
+		"Secrets":    createStrokedIcon("Secrets", svgKey),
 
 		// Access Control
-		"ServiceAccounts":     createStrokedIcon(svgAccountCircle), // theme.AccountIcon()
-		"Roles":               createStrokedIcon(svgAccountCircle), // theme.AccountIcon()
-		"RoleBindings":        createStrokedIcon(svgCheckCircle),   // theme.ConfirmIcon() -> Замінено
-		"ClusterRoles":        createStrokedIcon(svgClusterRole),   // Оригінальний SVG
-		"ClusterRoleBindings": createStrokedIcon(svgCheckCircle),   // theme.ConfirmIcon() -> Замінено
+		"ServiceAccounts":     createStrokedIcon("ServiceAccounts", svgAccountCircle),
+		"Roles":               createStrokedIcon("Roles", svgBadge),
+		"RoleBindings":        createStrokedIcon("RoleBindings", svgLink),
+		"ClusterRoles":        createStrokedIcon("ClusterRoles", svgPolicy), // Змінено
+		"ClusterRoleBindings": createStrokedIcon("ClusterRoleBindings", svgLink),
 
-		// Branches
-		"Cluster":        createStrokedIcon(svgHome),          // theme.HomeIcon()
-		"Workloads":      createStrokedIcon(svgList),          // theme.ListIcon()
-		"Network":        createStrokedIcon(svgInfo),          // theme.InfoIcon()
-		"Storage":        createStrokedIcon(svgStorage),       // theme.StorageIcon()
-		"Configuration":  createStrokedIcon(svgArticle),       // theme.FileTextIcon()
-		"Access Control": createStrokedIcon(svgAccountCircle), // theme.AccountIcon()
+		// Branches (використовуємо ID гілок як ключі)
+		"Cluster":        createStrokedIcon("Cluster", svgHome),
+		"Workloads":      createStrokedIcon("Workloads", svgWorkOutline),
+		"Network":        createStrokedIcon("Network", svgLan),
+		"Storage":        createStrokedIcon("Storage", svgStorage),
+		"Configuration":  createStrokedIcon("Configuration", svgTune),
+		"Access Control": createStrokedIcon("Access Control", svgAdminPanelSettings),
 
 		// Defaults
-		"default":        createStrokedIcon(svgHelpOutline), // theme.QuestionIcon()
-		"branch_default": createStrokedIcon(svgFolder),      // theme.FolderIcon()
+		"default":        createStrokedIcon("default", svgHelpOutline),
+		"branch_default": createStrokedIcon("branch_default", svgFolder),
 	}
+
 }
 
 // Мапи для дерева ресурсів
@@ -373,6 +354,8 @@ func switchContext(contextName string) error {
 }
 
 // --- Підключення до кластера ---
+// --- Підключення до кластера ---
+// --- Підключення до кластера ---
 func connectToCluster(contextName string) (*kubernetes.Clientset, string, error) {
 	logInfo("Спроба підключення до: %s", contextName)
 	if statusBar != nil {
@@ -393,7 +376,10 @@ func connectToCluster(contextName string) (*kubernetes.Clientset, string, error)
 		}
 		return nil, "", fmt.Errorf("помилка конфігу %s: %w", contextName, err)
 	}
-	restConfig.Timeout = 10 * time.Second
+
+	// Встановлюємо Timeout в 0 для стрімінгових запитів
+	restConfig.Timeout = 0 // Вимикаємо глобальний таймаут, покладаємось на контекст
+
 	clientset, err := kubernetes.NewForConfig(restConfig)
 	if err != nil {
 		logError("Помилка clientset '%s': %v", contextName, err)
@@ -403,14 +389,19 @@ func connectToCluster(contextName string) (*kubernetes.Clientset, string, error)
 		return nil, "", fmt.Errorf("помилка клієнта %s: %w", contextName, err)
 	}
 	logDebug("Clientset '%s' створено.", contextName)
-	serverVersion, err := clientset.Discovery().ServerVersion()
+
+	// ---> ВИПРАВЛЕНО: Прибрано аргумент context з ServerVersion() <---
+	serverVersion, err := clientset.Discovery().ServerVersion() // БЕЗ аргументів
+
 	if err != nil {
 		logError("Помилка версії '%s': %v", contextName, err)
 		if statusBar != nil {
 			statusBar.SetText(fmt.Sprintf("Помилка версії '%s': %v", getDisplayName(contextName), err))
 		}
+		// Повертаємо clientset, навіть якщо версію отримати не вдалось
 		return clientset, "Помилка версії", fmt.Errorf("помилка версії %s: %w", contextName, err)
 	}
+
 	versionString := serverVersion.GitVersion
 	logInfo("Успіх '%s'. Версія: %s", contextName, versionString)
 	if statusBar != nil {
@@ -419,6 +410,20 @@ func connectToCluster(contextName string) (*kubernetes.Clientset, string, error)
 		})
 	}
 	return clientset, versionString, nil
+}
+
+// parseK8sTimestamp намагається витягти час з рядка логу Kubernetes.
+// Очікує формат RFC3339Nano на початку рядка (напр., "2024-01-15T10:30:00.123456789Z ").
+func parseK8sTimestamp(logLine string) (time.Time, bool) {
+	parts := strings.SplitN(logLine, " ", 2) // Розділяємо по першому пробілу
+	if len(parts) > 0 {
+		// Пробуємо розпарсити першу частину як час
+		t, err := time.Parse(time.RFC3339Nano, parts[0])
+		if err == nil {
+			return t, true // Успішно розпарсили
+		}
+	}
+	return time.Time{}, false // Не вдалося розпарсити
 }
 
 // --- Логіка відображення ---
@@ -2344,12 +2349,11 @@ func showLogWindow(namespace, podName, containerName string) {
 	logWindow.Show()
 }
 
-// Отримує та стрімить логи для вказаного контейнера пода з батчингом (спрощена версія без окремої горутини відправки)
+// Отримує та стрімить логи для вказаного контейнера пода з оптимізаціями
 func streamLogs(ctx context.Context, namespace, podName, containerName string,
 	entry *widget.Entry, followCheck *widget.Check, scroll *container.Scroll) {
 
 	logDebug("streamLogs: Starting for %s/%s [%s]", namespace, podName, containerName)
-	// Лог при виході з функції для діагностики
 	defer logDebug("streamLogs: Exiting for %s/%s [%s]", namespace, podName, containerName)
 
 	stateMu.RLock()
@@ -2362,14 +2366,15 @@ func streamLogs(ctx context.Context, namespace, podName, containerName string,
 		return
 	}
 
-	// --- Змінні для батчингу ---
+	// --- Оптимізація: Обмеження логів та відстеження часу ---
+	const maxLogLines = 5000        // Максимальна кількість рядків у віджеті
+	var latestTimestamp metav1.Time // Час останнього отриманого рядка
+	var bufferMutex sync.Mutex      // М'ютекс для буфера та timestamp
 	var logBuffer strings.Builder
-	var bufferMutex sync.Mutex // М'ютекс все ще потрібен, якщо доступ до буфера можливий з UI (хоча тут наче ні)
 	bufferSize := 0
-	maxBufferSize := 50 // Батч по 50 рядків
+	maxBufferSize := 50
 
-	// --- Функція для відправки буфера в UI ---
-	// Викликається напряму з основного потоку горутини streamLogs
+	// --- Функція для відправки буфера в UI (з обрізанням) ---
 	flushBuffer := func() {
 		bufferMutex.Lock()
 		if bufferSize == 0 {
@@ -2378,17 +2383,32 @@ func streamLogs(ctx context.Context, namespace, podName, containerName string,
 		}
 		logsToSend := logBuffer.String()
 		logBuffer.Reset()
-		//currentSize := bufferSize
 		bufferSize = 0
-		bufferMutex.Unlock()
+		bufferMutex.Unlock() // Розблокуємо перед оновленням UI
 
 		queueUIUpdate(func() { // Використовуємо fyne.Do
-			// logDebug("Flushing %d log lines to UI", currentSize) // Можна закоментувати для чистоти логів
+			currentText := entry.Text
 			prefix := ""
-			if entry.Text != "" && !strings.HasSuffix(entry.Text, "\n") && len(logsToSend) > 0 {
+			if currentText != "" && !strings.HasSuffix(currentText, "\n") && len(logsToSend) > 0 {
 				prefix = "\n"
 			}
-			entry.Append(prefix + logsToSend)
+			newText := currentText + prefix + logsToSend
+
+			// Оптимізація: Обрізаємо старі рядки, якщо їх забагато
+			lines := strings.Split(newText, "\n")
+			if len(lines) > maxLogLines {
+				startIndex := len(lines) - maxLogLines
+				// Переконуємось, що не обрізаємо порожній рядок на початку, якщо він є
+				if lines[startIndex-1] == "" && startIndex > 0 {
+					startIndex-- // Якщо перед потрібним рядком був перенос - беремо і його
+				}
+				lines = lines[startIndex:]
+				newText = strings.Join(lines, "\n")
+				logDebug("streamLogs: Log entry trimmed to %d lines", maxLogLines)
+			}
+
+			entry.SetText(newText) // Використовуємо SetText після обрізання
+
 			if followCheck.Checked && scroll != nil {
 				scroll.ScrollToBottom()
 			}
@@ -2396,71 +2416,71 @@ func streamLogs(ctx context.Context, namespace, podName, containerName string,
 	}
 	// --- Кінець flushBuffer ---
 
-	// --- Функція для додавання рядка в буфер і перевірки на заповнення ---
+	// --- Функція для додавання рядка в буфер (з оновленням timestamp) ---
 	addLineToBuffer := func(line string) {
+		parsedTime, ok := parseK8sTimestamp(line) // Парсимо час
+
 		bufferMutex.Lock()
 		logBuffer.WriteString(line + "\n")
 		bufferSize++
+		if ok && (latestTimestamp.IsZero() || parsedTime.After(latestTimestamp.Time)) {
+			// Оновлюємо час останнього рядка (додаємо невеликий зсув, щоб точно не пропустити)
+			// Note: Adding a small duration might fetch the last line again, which is safer than potentially missing one.
+			latestTimestamp = metav1.NewTime(parsedTime.Add(time.Nanosecond))
+			// logDebug("Latest timestamp updated: %s", latestTimestamp.Format(time.RFC3339Nano)) // Debug
+		}
 		shouldFlushNow := bufferSize >= maxBufferSize
 		bufferMutex.Unlock()
 
 		if shouldFlushNow {
-			// logDebug("Log buffer full (%d lines), flushing.", maxBufferSize)
-			flushBuffer() // Відправляємо одразу
+			flushBuffer()
 		}
 	}
 	// --- Кінець addLineToBuffer ---
 
-	// Гарантована відправка залишків буфера при виході з функції streamLogs
-	// Важливо: defer виконується останнім, після всіх return
+	// Гарантована відправка залишків буфера при виході
 	defer func() {
 		logDebug("streamLogs: Flushing remaining buffer on exit for %s/%s [%s]", namespace, podName, containerName)
 		flushBuffer()
 	}()
 
 	// --- Початкове завантаження ---
-	var tailLines int64 = 100
+	var tailLines int64 = 100 // Кількість рядків для початкового завантаження
 	opts := &corev1.PodLogOptions{Container: containerName, TailLines: &tailLines, Timestamps: true}
 	logDebug("Завантаження початкових %d рядків...", tailLines)
 	req := clientset.CoreV1().Pods(namespace).GetLogs(podName, opts)
-	stream, err := req.Stream(ctx) // Використовуємо контекст вікна
+	stream, err := req.Stream(ctx)
 	if err != nil {
 		logError("Помилка отримання початкового stream: %v", err)
 		queueUIUpdate(func() { entry.SetText(fmt.Sprintf("Помилка отримання логів:\n%v", err)) })
-		return // defer flushBuffer() спрацює
+		return
 	}
 
 	scanner := bufio.NewScanner(stream)
 	initialLineCount := 0
 	for scanner.Scan() {
-		// Перевіряємо контекст ПЕРЕД обробкою рядка
 		select {
 		case <-ctx.Done():
 			logInfo("Скасовано під час читання початкових логів.")
-			stream.Close() // Закриваємо потік
-			return         // defer flushBuffer() спрацює
+			stream.Close()
+			return
 		default:
-			addLineToBuffer(scanner.Text())
+			addLineToBuffer(scanner.Text()) // Додаємо в буфер і оновлюємо latestTimestamp
 			initialLineCount++
 		}
 	}
-	stream.Close() // Закриваємо потік після читання
-	logDebug("Прочитано %d початкових рядків.", initialLineCount)
-	if errScan := scanner.Err(); errScan != nil {
-		// Перевіряємо чи помилка не через скасування контексту
-		if !errors.Is(errScan, context.Canceled) && ctx.Err() != context.Canceled {
-			logError("Помилка сканера (початкові логи): %v", errScan)
-			addLineToBuffer(fmt.Sprintf("\nПОМИЛКА ЧИТАННЯ ПОЧАТКОВИХ ЛОГІВ: %v\n", errScan))
-		} else {
-			logInfo("Сканер початкових логів завершився через скасування контексту.")
-			return // defer flushBuffer() спрацює
-		}
+	stream.Close()
+	logDebug("Прочитано %d початкових рядків. Last timestamp: %s", initialLineCount, latestTimestamp.Format(time.RFC3339Nano))
+	if errScan := scanner.Err(); errScan != nil && !errors.Is(errScan, context.Canceled) && ctx.Err() != context.Canceled {
+		logError("Помилка сканера (початкові логи): %v", errScan)
+		addLineToBuffer(fmt.Sprintf("\nПОМИЛКА ЧИТАННЯ ПОЧАТКОВИХ ЛОГІВ: %v\n", errScan))
 	}
-	// Не потрібно примусової відправки тут, defer відправить або наступний етап
+	// Відправляємо початкові логи перед початком стрімінгу
+	flushBuffer()
+	// --- Кінець початкового завантаження ---
 
 	// --- Стрімінг (Follow=true) ---
-	for { // Зовнішній цикл для перепідключення
-		// Перевірка контексту на початку кожної спроби перепідключення
+	for {
 		select {
 		case <-ctx.Done():
 			logInfo("Стрімінг зупинено перед циклом перепідключення (контекст скасовано).")
@@ -2468,32 +2488,47 @@ func streamLogs(ctx context.Context, namespace, podName, containerName string,
 		default:
 		}
 
-		// Перевіряємо Follow чекбокс
 		if !followCheck.Checked {
 			logDebug("Follow вимкнено, завершення streamLogs.")
-			return // Якщо слідування вимкнене, завершуємо горутину
+			return
 		}
 
-		logDebug("Запуск/перезапуск стрімінгу (Follow=true)...")
-		streamOpts := &corev1.PodLogOptions{Container: containerName, Follow: true, Timestamps: true, SinceTime: &metav1.Time{Time: time.Now()}} // Додано SinceTime
+		// --- Оптимізація: Використовуємо latestTimestamp для SinceTime ---
+		streamOpts := &corev1.PodLogOptions{
+			Container:  containerName,
+			Follow:     true,
+			Timestamps: true,
+			// SinceTime: nil, // За замовчуванням - з кінця, якщо latestTimestamp ще не встановлено
+		}
+		bufferMutex.Lock() // Блокуємо для читання latestTimestamp
+		if !latestTimestamp.IsZero() {
+			// Якщо ми вже отримали хоча б один рядок, використовуємо його час
+			streamOpts.SinceTime = &latestTimestamp
+			logDebug("Запуск/перезапуск стрімінгу з SinceTime: %s", latestTimestamp.Format(time.RFC3339Nano))
+		} else {
+			// Якщо початкові логи були порожні, просто слідуємо з кінця
+			logDebug("Запуск/перезапуск стрімінгу (з кінця, не було попередніх міток часу)...")
+		}
+		bufferMutex.Unlock() // Розблоковуємо
+		// Видалено TailLines для follow запиту, оскільки SinceTime надійніше
+		// --------------------------------------------------------------
+
 		reqFollow := clientset.CoreV1().Pods(namespace).GetLogs(podName, streamOpts)
-		streamFollow, errFollow := reqFollow.Stream(ctx) // Використовуємо контекст вікна
+		streamFollow, errFollow := reqFollow.Stream(ctx)
 
 		if errFollow != nil {
-			// Якщо контекст скасовано, це очікувана помилка при закритті вікна
 			if errors.Is(errFollow, context.Canceled) || ctx.Err() == context.Canceled {
 				logInfo("Не вдалося почати стрімінг, оскільки контекст скасовано.")
-				return // Виходимо
+				return
 			}
 			logError("Помилка отримання Follow stream: %v", errFollow)
 			addLineToBuffer(fmt.Sprintf("\nПОМИЛКА СТРІМІНГУ: %v\n", errFollow))
-			flushBuffer() // Відправляємо помилку одразу
-			// Пауза перед повторною спробою
+			flushBuffer()
 			select {
-			case <-time.After(5 * time.Second):
-				continue // Наступна ітерація циклу for
+			case <-time.After(5 * time.Second): // Пауза при помилці з'єднання
+				continue
 			case <-ctx.Done():
-				logInfo("Стрімінг зупинено після помилки підключення під час паузи (контекст скасовано).")
+				logInfo("Стрімінг зупинено під час паузи після помилки (контекст скасовано).")
 				return
 			}
 		}
@@ -2503,78 +2538,69 @@ func streamLogs(ctx context.Context, namespace, podName, containerName string,
 		streamLineCount := 0
 	ScanLoopFollow:
 		for scannerFollow.Scan() {
-			// Перевіряємо контекст ПЕРЕД обробкою рядка
 			select {
 			case <-ctx.Done():
 				logInfo("Стрімінг перервано під час читання (контекст скасовано).")
 				streamFollow.Close()
-				break ScanLoopFollow // Виходимо з внутрішнього циклу сканера
+				break ScanLoopFollow
 			default:
-				// Follow перевіряємо ТУТ, щоб не пропустити вимкнення
 				if !followCheck.Checked {
 					logDebug("Follow вимкнено під час читання потоку.")
 					streamFollow.Close()
 					break ScanLoopFollow
 				}
-				addLineToBuffer(scannerFollow.Text())
+				addLineToBuffer(scannerFollow.Text()) // Додаємо в буфер і оновлюємо timestamp
 				streamLineCount++
 			}
 		} // Кінець for scannerFollow.Scan()
 
-		streamFollow.Close() // Закриваємо потік після виходу з ScanLoopFollow
+		streamFollow.Close()
 		logDebug("Прочитано %d рядків у поточному сеансі стрімінгу.", streamLineCount)
-		// flushBuffer() // Не викликаємо тут, defer зробить це гарантовано при виході
 
-		// Перевірка контексту ПІСЛЯ виходу з внутрішнього циклу
 		select {
 		case <-ctx.Done():
 			logInfo("Стрімінг завершено (контекст скасовано після ScanLoopFollow).")
-			return // Остаточний вихід, defer flushBuffer() спрацює
-		default: // Якщо контекст ще не скасовано
+			return
+		default:
 		}
 
-		// Перевірка помилок сканера після завершення ScanLoopFollow
+		// Перевірка помилок сканера
 		if errScan := scannerFollow.Err(); errScan != nil {
 			if errors.Is(errScan, context.Canceled) {
 				logInfo("Сканер зупинено через скасування контексту (після ScanLoopFollow, errScan).")
-				return // Виходимо, defer спрацює
+				return
+				// Помилка "request canceled" - це очікуваний таймаут від сервера, логуємо як DEBUG
 			} else if strings.Contains(errScan.Error(), "net/http: request canceled") || errors.Is(errScan, context.DeadlineExceeded) {
-				logDebug("Потік логів завершився (таймаут/скасування сервером): %v", errScan)
-				// Не показуємо користувачу, просто перепідключимось
+				logDebug("Потік логів завершився (очікуваний таймаут/скасування сервером): %v", errScan)
 			} else {
 				logError("Неочікувана помилка сканера: %v", errScan)
 				addLineToBuffer(fmt.Sprintf("\nПОМИЛКА ЧИТАННЯ ПОТОКУ: %v\n", errScan))
-				// flushBuffer() // Відправиться через defer або на наступній ітерації
 			}
-			// Пауза перед спробою перепідключення (якщо контекст ще активний)
+			// Пауза перед перепідключенням (навіть при очікуваному таймауті)
 			if ctx.Err() == nil {
 				select {
-				case <-time.After(2 * time.Second):
+				case <-time.After(2 * time.Second): // Коротка пауза перед перепідключенням
 					logDebug("Пауза перед спробою перепідключення до стріму логів...")
-					// Цикл for продовжиться
 				case <-ctx.Done():
-					logInfo("Стрімінг зупинено після помилки сканера під час паузи (контекст скасовано).")
-					return // defer спрацює
+					logInfo("Стрімінг зупинено під час паузи після помилки сканера (контекст скасовано).")
+					return
 				}
 			} else {
 				return
-			} // Якщо контекст вже скасовано, виходимо
+			} // Контекст вже скасовано
 		} else {
-			// Потік завершився без помилки сканера
-			// Якщо Follow все ще true і контекст активний, спробуємо перепідключитися
+			// Потік завершився без помилки сканера (можливо, под був видалений?)
 			if followCheck.Checked && ctx.Err() == nil {
-				logWarning("Потік логів завершився без помилок сканера. Спроба перепідключення...")
+				logWarning("Потік логів завершився без помилок сканера. Спроба перепідключення через 2с...")
 				select {
 				case <-time.After(2 * time.Second):
-					// Цикл for продовжиться
 				case <-ctx.Done():
-					logInfo("Стрімінг зупинено після нормального завершення потоку під час паузи (контекст скасовано).")
-					return // defer спрацює
+					logInfo("Стрімінг зупинено під час паузи після нормального завершення потоку (контекст скасовано).")
+					return
 				}
 			} else {
-				// Якщо Follow вимкнено або контекст скасовано, завершуємо
 				logInfo("Стрімінг завершено (потік закрився без помилок, Follow=%v, ctx.Err=%v).", followCheck.Checked, ctx.Err())
-				return // defer спрацює
+				return
 			}
 		}
 	} // Кінець зовнішнього циклу for
@@ -3549,6 +3575,7 @@ func displayClusterOverview(serverVersion string) {
 
 // --- Головна функція та запуск Fyne ---
 func main() {
+	createIcons()
 	log.SetFlags(log.Ldate | log.Ltime)
 	logInfo("Запуск " + logPrefix + "...")
 	logInfo("Версія Go: %s", runtime.Version())
