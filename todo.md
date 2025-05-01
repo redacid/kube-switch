@@ -7,7 +7,7 @@ https://github.com/fyne-io/fyne
 
 sudo apt install libx11-dev
 
-apt install freeglut3-dev gcc libgl1-mesa-dev xorg-dev libxkbcommon-dev
+sudo apt install freeglut3-dev gcc libgl1-mesa-dev xorg-dev libxkbcommon-dev
 
 sudo apt-get install libx11-dev ................. for X11/Xlib.h
 sudo apt-get install mesa-common-dev........ for GL/glx.h
